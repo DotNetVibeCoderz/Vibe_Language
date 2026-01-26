@@ -1,0 +1,9 @@
+menggunakan System;
+
+kelas Program
+{
+    publik statis void Utama()
+    {
+        tulis("Halo Dunia dari Boso!");
+    }
+}

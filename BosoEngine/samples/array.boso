@@ -1,0 +1,13 @@
+menggunakan System;
+
+kelas Program
+{
+    publik statis void Utama()
+    {
+        string[] nama = {"Andi", "Budi", "Cici"};
+        untuk (angka i = 0; i < nama.Length; i++)
+        {
+            tulis("Nama: " + nama[i]);
+        }
+    }
+}

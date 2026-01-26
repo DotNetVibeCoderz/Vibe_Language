@@ -1,0 +1,12 @@
+menggunakan System;
+
+kelas Program
+{
+    publik statis void Utama()
+    {
+        untuk (angka i = 0; i < 5; i++)
+        {
+            tulis("Loop ke-" + i);
+        }
+    }
+}

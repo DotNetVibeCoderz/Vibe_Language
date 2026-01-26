@@ -1,0 +1,15 @@
+menggunakan System;
+
+kelas Program
+{
+    publik statis angka Tambah(angka a, angka b)
+    {
+        kembali a + b;
+    }
+
+    publik statis void Utama()
+    {
+        angka hasil = Tambah(10, 20);
+        tulis("Hasil: " + hasil);
+    }
+}

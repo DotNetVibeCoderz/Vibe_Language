@@ -1,0 +1,17 @@
+menggunakan System;
+
+kelas Program
+{
+    publik statis void Utama()
+    {
+        angka nilai = 75;
+        jika (nilai >= 60)
+        {
+            tulis("Lulus");
+        }
+        lain
+        {
+            tulis("Tidak Lulus");
+        }
+    }
+}
