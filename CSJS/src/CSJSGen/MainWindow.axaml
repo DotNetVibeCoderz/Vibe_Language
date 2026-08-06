@@ -1,0 +1,36 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:CSJSGen"
+        x:Class="CSJSGen.MainWindow"
+        Title="CSJSGen — Gravicode Studios"
+        Width="1280" Height="720"
+        MinWidth="960" MinHeight="620"
+        WindowStartupLocation="CenterScreen"
+        Background="#171520">
+
+  <!--
+    The window is a thin shell. Everything the user sees lives in the Blazor components rendered
+    inside the BlazorWebView, which NativeControlHost embeds here.
+  -->
+  <Panel>
+    <local:BlazorHost Name="Host" />
+
+    <!--
+      Shown until the WebView reports it is ready. A native child window always paints above
+      composited content, so this has to be removed rather than merely covered.
+    -->
+    <Border Name="LoadingOverlay" Background="#171520" IsHitTestVisible="False">
+      <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="16">
+        <TextBlock Text="CSJSGen"
+                   FontSize="28" FontWeight="SemiBold" Foreground="#e9e6f2"
+                   HorizontalAlignment="Center" />
+        <TextBlock Text="Menyiapkan Jack The Code Bender…"
+                   FontSize="13" Foreground="#9691ab"
+                   HorizontalAlignment="Center" />
+        <ProgressBar IsIndeterminate="True" Width="220" Height="3"
+                     Foreground="#a78bfa" Background="#332e47" />
+      </StackPanel>
+    </Border>
+  </Panel>
+
+</Window>

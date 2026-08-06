@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSJS — DOM Manipulation</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fbfaf8;
+        --fg: #1a1917;
+        --muted: #6b6862;
+        --accent: #c2410c;
+        --card: #ffffff;
+        --border: #e7e3dc;
+        --done: #16a34a;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14130f;
+          --fg: #f2efe9;
+          --muted: #a39e94;
+          --accent: #fb923c;
+          --card: #1e1c17;
+          --border: #302d26;
+          --done: #4ade80;
+        }
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: start center;
+        padding: 3rem 1.5rem;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      .card {
+        width: min(36rem, 100%);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 2rem;
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+      }
+
+      .eyebrow {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+        margin: 0 0 0.5rem;
+      }
+
+      h1 { margin: 0 0 1.5rem; font-size: 1.75rem; letter-spacing: -0.02em; }
+
+      .composer { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+
+      input[type="text"] {
+        flex: 1;
+        font: inherit;
+        padding: 0.6rem 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: var(--bg);
+        color: var(--fg);
+      }
+
+      input[type="text"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 0.6rem 1.1rem;
+        border: none;
+        border-radius: 0.5rem;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+        transition: filter 120ms ease, transform 120ms ease;
+      }
+
+      button:hover { filter: brightness(1.08); }
+      button:active { transform: translateY(1px); }
+
+      ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+        padding: 0.7rem 0.85rem;
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        transition: background 150ms ease, opacity 150ms ease;
+      }
+
+      .row:hover { background: color-mix(in oklab, var(--accent) 6%, transparent); }
+      .row .label { flex: 1; }
+      .row.done .label { text-decoration: line-through; color: var(--muted); }
+      .row.done { opacity: 0.7; }
+
+      .remove {
+        background: transparent;
+        color: var(--muted);
+        font-size: 0.8125rem;
+        font-weight: 500;
+        padding: 0.3rem 0.6rem;
+      }
+
+      .remove:hover { color: var(--accent); filter: none; }
+
+      .track {
+        margin-top: 1.5rem;
+        height: 6px;
+        border-radius: 999px;
+        background: var(--border);
+        overflow: hidden;
+      }
+
+      #progress {
+        height: 100%;
+        width: 0%;
+        background: var(--done);
+        border-radius: 999px;
+        transition: width 300ms cubic-bezier(0.4, 0, 0.2, 1);
+      }
+
+      #summary { margin-top: 0.75rem; font-size: 0.875rem; color: var(--muted); }
+
+      footer {
+        margin-top: 2rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--border);
+        font-size: 0.8125rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <p class="eyebrow">CSJS Sample 02</p>
+      <h1>Daftar Tugas</h1>
+
+      <div class="composer">
+        <input id="new-item" type="text" placeholder="Tambah tugas baru…" />
+        <button id="add">Tambah</button>
+      </div>
+
+      <ul id="list"></ul>
+
+      <div class="track"><div id="progress"></div></div>
+      <p id="summary"></p>
+
+      <footer>Gravicode Studios — dipimpin oleh Kang Fadhil</footer>
+    </main>
+
+    <script type="module">
+      import { TodoApp } from './Program.js';
+      TodoApp.Start();
+    </script>
+  </body>
+</html>

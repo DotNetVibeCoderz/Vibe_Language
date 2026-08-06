@@ -1,0 +1,203 @@
+using System;
+using System.Collections.Generic;
+using CSJS;
+using CSJS.Browser;
+
+namespace ThreeSample;
+
+/// <summary>One orbiting shape, with the state needed to animate it.</summary>
+public class Orbiter
+{
+    public Mesh Mesh { get; set; } = null!;
+    public double Radius { get; set; }
+    public double Speed { get; set; }
+    public double Phase { get; set; }
+    public double Height { get; set; }
+}
+
+/// <summary>
+/// A rotating 3D scene, written entirely in C#.
+/// <para>
+/// Nothing here is a shim: the three.js classes are reached through <c>[JsImport]</c> bindings,
+/// so the emitted module imports them from <c>'three'</c> directly and a bundler treats it like
+/// any other JavaScript that uses the library.
+/// </para>
+/// </summary>
+[JsExport(Global = true)]
+public static class SceneApp
+{
+    private static Scene _scene = null!;
+    private static PerspectiveCamera _camera = null!;
+    private static WebGLRenderer _renderer = null!;
+    private static Mesh _core = null!;
+    private static readonly List<Orbiter> Orbiters = new();
+
+    private static double _elapsed;
+    private static bool _paused;
+
+    public static void Start()
+    {
+        var mount = Document.GetElementById("scene");
+        if (mount is null) return;
+
+        BuildRenderer(mount);
+        BuildScene();
+        BuildOrbiters();
+        WireControls(mount);
+
+        Window.AddEventListener("resize", _ => Resize(mount));
+        Window.RequestAnimationFrame(Animate);
+    }
+
+    private static void BuildRenderer(Element mount)
+    {
+        _renderer = new WebGLRenderer(new RendererOptions { Antialias = true, Alpha = true });
+        _renderer.SetPixelRatio(Window.DevicePixelRatio);
+        _renderer.SetSize(mount.ClientWidth, mount.ClientHeight);
+        _renderer.SetClearColor(0x000000, 0);
+        mount.AppendChild(_renderer.DomElement);
+    }
+
+    private static void BuildScene()
+    {
+        _scene = new Scene();
+
+        var aspect = mountAspect();
+        _camera = new PerspectiveCamera(55, aspect, 0.1, 100);
+        _camera.Position.Set(0, 2.5, 7);
+
+        _scene.Add(new AmbientLight(0xffffff, 0.35));
+
+        var key = new PointLight(0xffd9b3, 90);
+        key.Position.Set(6, 8, 6);
+        _scene.Add(key);
+
+        var rim = new PointLight(0x6ea8ff, 45);
+        rim.Position.Set(-7, -3, -5);
+        _scene.Add(rim);
+
+        _core = new Mesh(
+            new IcosahedronGeometry(1.4, 1),
+            new MeshStandardMaterial(new MaterialOptions
+            {
+                Color = 0xfb923c,
+                Roughness = 0.35,
+                Metalness = 0.15,
+                FlatShading = true,
+            }));
+
+        _scene.Add(_core);
+    }
+
+    private static void BuildOrbiters()
+    {
+        // Colours cycle through a small palette so the ring reads as one system.
+        var palette = new[] { 0x38bdf8, 0xa78bfa, 0x34d399, 0xf472b6, 0xfbbf24 };
+
+        for (var i = 0; i < 5; i++)
+        {
+            var material = new MeshStandardMaterial(new MaterialOptions
+            {
+                Color = palette[i],
+                Roughness = 0.4,
+                Metalness = 0.1,
+                FlatShading = true,
+            });
+
+            var mesh = new Mesh(new BoxGeometry(0.42, 0.42, 0.42), material);
+            _scene.Add(mesh);
+
+            Orbiters.Add(new Orbiter
+            {
+                Mesh = mesh,
+                Radius = 2.6 + i * 0.45,
+                Speed = 0.6 - i * 0.07,
+                // Spacing the phases evenly keeps the shapes from bunching up.
+                Phase = i * (Math.PI * 2 / 5),
+                Height = Math.Sin(i) * 0.9,
+            });
+        }
+    }
+
+    private static void WireControls(Element mount)
+    {
+        var toggle = Document.GetElementById("toggle");
+        toggle?.AddEventListener("click", _ =>
+        {
+            _paused = !_paused;
+            toggle.TextContent = _paused ? "Lanjutkan" : "Jeda";
+        });
+
+        // Dragging left and right swings the camera around the scene.
+        var dragging = false;
+        var lastX = 0.0;
+        var angle = 0.0;
+
+        mount.AddEventListener("pointerdown", e =>
+        {
+            dragging = true;
+            lastX = ((MouseEvent)e).ClientX;
+        });
+
+        Window.AddEventListener("pointerup", _ => dragging = false);
+
+        Window.AddEventListener("pointermove", e =>
+        {
+            if (!dragging) return;
+
+            var x = ((MouseEvent)e).ClientX;
+            angle += (x - lastX) * 0.01;
+            lastX = x;
+
+            var distance = 7.6;
+            _camera.Position.Set(Math.Sin(angle) * distance, 2.5, Math.Cos(angle) * distance);
+        });
+    }
+
+    private static double mountAspect()
+    {
+        var mount = Document.GetElementById("scene");
+        if (mount is null || mount.ClientHeight == 0) return 1.6;
+        return mount.ClientWidth / mount.ClientHeight;
+    }
+
+    private static void Resize(Element mount)
+    {
+        _camera.Aspect = mountAspect();
+        _camera.UpdateProjectionMatrix();
+        _renderer.SetSize(mount.ClientWidth, mount.ClientHeight);
+    }
+
+    /// <summary>
+    /// The animation loop. It re-registers itself each frame, which is how
+    /// <c>requestAnimationFrame</c> works and reads the same in C#.
+    /// </summary>
+    private static void Animate(double timestamp)
+    {
+        Window.RequestAnimationFrame(Animate);
+
+        if (!_paused)
+        {
+            _elapsed += 0.016;
+
+            _core.Rotation.X = _elapsed * 0.35;
+            _core.Rotation.Y = _elapsed * 0.5;
+
+            foreach (var orbiter in Orbiters)
+            {
+                var theta = _elapsed * orbiter.Speed + orbiter.Phase;
+
+                orbiter.Mesh.Position.Set(
+                    Math.Cos(theta) * orbiter.Radius,
+                    orbiter.Height + Math.Sin(theta * 1.6) * 0.5,
+                    Math.Sin(theta) * orbiter.Radius);
+
+                orbiter.Mesh.Rotation.X = theta * 1.4;
+                orbiter.Mesh.Rotation.Y = theta;
+            }
+        }
+
+        // The camera always looks at the origin, so no lookAt binding is needed.
+        _renderer.Render(_scene, _camera);
+    }
+}

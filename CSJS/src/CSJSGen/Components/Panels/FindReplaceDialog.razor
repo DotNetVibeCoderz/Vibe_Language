@@ -1,0 +1,56 @@
+@* Search and replace over the active file. *@
+@inject IJSRuntime Js
+
+<div class="overlay" @onclick="OnClose">
+    <div class="dialog" style="width:min(440px, calc(100vw - 48px))" @onclick:stopPropagation>
+        <div class="dialog-head">
+            <span class="dialog-title">Cari dan ganti</span>
+            <button class="icon-button" @onclick="OnClose">✕</button>
+        </div>
+
+        <div class="dialog-body">
+            <div class="field">
+                <label for="find-input">Cari</label>
+                <input id="find-input" type="text" @bind="_find" @bind:event="oninput"
+                       @onkeydown="OnKeyDown" />
+            </div>
+
+            <div class="field" style="margin-bottom:0">
+                <label for="replace-input">Ganti dengan</label>
+                <input id="replace-input" type="text" @bind="_replace" @bind:event="oninput"
+                       @onkeydown="OnKeyDown" />
+                <p class="help">Kosongkan untuk hanya mencari dan menyorot kemunculan pertama.</p>
+            </div>
+        </div>
+
+        <div class="dialog-foot">
+            <button class="button" @onclick="OnClose">Tutup</button>
+            <button class="button" @onclick="() => Apply(false)">Ganti satu</button>
+            <button class="button primary" @onclick="() => Apply(true)">Ganti semua</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<(string Find, string Replace, bool All)> OnApply { get; set; }
+    [Parameter] public string InitialQuery { get; set; } = "";
+
+    private string _find = "";
+    private string _replace = "";
+
+    protected override void OnParametersSet() => _find = InitialQuery;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Js.InvokeVoidAsync("csjsgen.focus", "#find-input");
+    }
+
+    private async Task Apply(bool all) => await OnApply.InvokeAsync((_find, _replace, all));
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Apply(false);
+        else if (e.Key == "Escape") await OnClose.InvokeAsync();
+    }
+}

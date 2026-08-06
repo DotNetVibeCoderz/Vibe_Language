@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk.BlazorWebAssembly">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>
+    <RootNamespace>CSJS.Playground</RootNamespace>
+
+    <!--
+      The transpiler runs entirely in the browser, so Roslyn ships in the payload. Trimming is
+      off because Roslyn resolves types by reflection and a trimmed build fails at runtime.
+    -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <BlazorEnableCompression>true</BlazorEnableCompression>
+
+    <!--
+      WebCIL wraps assemblies as WebAssembly modules, which Roslyn cannot read. The transpiler
+      binds against these very assemblies at runtime, so they have to stay real PE files.
+    -->
+    <WasmEnableWebcil>false</WasmEnableWebcil>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly" Version="10.0.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.WebAssembly.DevServer" Version="10.0.10" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\src\CSJS.Core\CSJS.Core.csproj" />
+    <ProjectReference Include="..\src\CSJS.Interop\CSJS.Interop.csproj" />
+  </ItemGroup>
+
+</Project>

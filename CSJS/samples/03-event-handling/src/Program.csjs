@@ -1,0 +1,204 @@
+using System;
+using System.Collections.Generic;
+using CSJS;
+using CSJS.Browser;
+
+namespace EventHandling;
+
+/// <summary>Operations the calculator understands.</summary>
+public enum Operation
+{
+    None,
+    Add,
+    Subtract,
+    Multiply,
+    Divide,
+}
+
+/// <summary>
+/// Calculator state and arithmetic, with no DOM knowledge at all.
+/// <para>
+/// Keeping this separate is what makes it testable: <c>CSJS.Testing</c> can exercise it on the
+/// JavaScript runtime without a browser anywhere in sight.
+/// </para>
+/// </summary>
+public class Calculator
+{
+    private double _accumulator;
+    private string _entry = "0";
+    private Operation _pending = Operation.None;
+    private bool _startNewEntry = true;
+
+    /// <summary>What the display should currently show.</summary>
+    public string Display => _entry;
+
+    /// <summary>Raised whenever the display changes, so the UI can re-render.</summary>
+    public event Action<string>? Changed;
+
+    public void EnterDigit(string digit)
+    {
+        if (_startNewEntry)
+        {
+            _entry = digit == "." ? "0." : digit;
+            _startNewEntry = false;
+        }
+        else if (digit == "." && _entry.Contains("."))
+        {
+            // A second decimal point would make the entry unparseable.
+            return;
+        }
+        else
+        {
+            _entry = _entry == "0" && digit != "." ? digit : _entry + digit;
+        }
+
+        Notify();
+    }
+
+    public void SetOperation(Operation operation)
+    {
+        Resolve();
+        _pending = operation;
+        _startNewEntry = true;
+        Notify();
+    }
+
+    public void Equals()
+    {
+        Resolve();
+        _pending = Operation.None;
+        _startNewEntry = true;
+        Notify();
+    }
+
+    public void Clear()
+    {
+        _accumulator = 0;
+        _entry = "0";
+        _pending = Operation.None;
+        _startNewEntry = true;
+        Notify();
+    }
+
+    public void Negate()
+    {
+        _entry = _entry.StartsWith("-") ? _entry.Substring(1) : "-" + _entry;
+        Notify();
+    }
+
+    private void Resolve()
+    {
+        var current = double.Parse(_entry);
+
+        if (_pending == Operation.None)
+        {
+            _accumulator = current;
+            return;
+        }
+
+        _accumulator = _pending switch
+        {
+            Operation.Add => _accumulator + current,
+            Operation.Subtract => _accumulator - current,
+            Operation.Multiply => _accumulator * current,
+            Operation.Divide => current == 0 ? double.NaN : _accumulator / current,
+            _ => current,
+        };
+
+        _entry = double.IsNaN(_accumulator) ? "Error" : _accumulator.ToString();
+    }
+
+    private void Notify() => Changed?.Invoke(_entry);
+}
+
+/// <summary>
+/// Wires HTML buttons to calculator methods. Every handler is a C# lambda; clicking a button
+/// in the browser lands in a C# method body.
+/// </summary>
+[JsExport(Global = true)]
+public static class CalculatorApp
+{
+    private static readonly Calculator Machine = new();
+
+    public static void Start()
+    {
+        // A C# event drives the render, so the UI has exactly one place it updates from.
+        Machine.Changed += UpdateDisplay;
+
+        WireDigits();
+        WireOperations();
+        WireKeyboard();
+
+        UpdateDisplay(Machine.Display);
+    }
+
+    private static void WireDigits()
+    {
+        foreach (var button in Document.QuerySelectorAll("[data-digit]"))
+        {
+            var digit = button.GetAttribute("data-digit") ?? "0";
+            button.AddEventListener("click", _ => Machine.EnterDigit(digit));
+        }
+    }
+
+    private static void WireOperations()
+    {
+        foreach (var button in Document.QuerySelectorAll("[data-op]"))
+        {
+            var name = button.GetAttribute("data-op") ?? "";
+            button.AddEventListener("click", _ => Dispatch(name));
+        }
+    }
+
+    private static void WireKeyboard()
+    {
+        Document.AddEventListener("keydown", e =>
+        {
+            var key = ((KeyboardEvent)e).Key;
+
+            if (key.Length == 1 && key[0] >= '0' && key[0] <= '9')
+            {
+                Machine.EnterDigit(key);
+                return;
+            }
+
+            switch (key)
+            {
+                case ".": Machine.EnterDigit("."); break;
+                case "+": Machine.SetOperation(Operation.Add); break;
+                case "-": Machine.SetOperation(Operation.Subtract); break;
+                case "*": Machine.SetOperation(Operation.Multiply); break;
+                case "/": Machine.SetOperation(Operation.Divide); break;
+                case "Enter":
+                case "=": Machine.Equals(); break;
+                case "Escape": Machine.Clear(); break;
+            }
+        });
+    }
+
+    private static void Dispatch(string name)
+    {
+        switch (name)
+        {
+            case "add": Machine.SetOperation(Operation.Add); break;
+            case "subtract": Machine.SetOperation(Operation.Subtract); break;
+            case "multiply": Machine.SetOperation(Operation.Multiply); break;
+            case "divide": Machine.SetOperation(Operation.Divide); break;
+            case "equals": Machine.Equals(); break;
+            case "clear": Machine.Clear(); break;
+            case "negate": Machine.Negate(); break;
+        }
+    }
+
+    private static void UpdateDisplay(string value)
+    {
+        var display = Document.GetElementById("display");
+        if (display is null) return;
+
+        display.TextContent = value;
+
+        // A brief class toggle gives the readout a visible pulse on every change.
+        display.ClassList.Add("pulse");
+        Timers.SetTimeout(() => display.ClassList.Remove("pulse"), 150);
+    }
+}

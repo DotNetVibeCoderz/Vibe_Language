@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CSJS.Cli</RootNamespace>
+    <AssemblyName>cs2js</AssemblyName>
+    <Nullable>enable</Nullable>
+
+    <PackAsTool>true</PackAsTool>
+    <!--
+      The DotNetCliToolTargets convention: naming the shim `dotnet-cs2js` is what makes
+      `dotnet cs2js build` resolve, because the driver looks for `dotnet-<verb>` on PATH.
+      The shim is also directly runnable, and CSJS.Cli.Standalone packs the short `cs2js` name.
+    -->
+    <ToolCommandName>dotnet-cs2js</ToolCommandName>
+    <PackageId>CSJS.Cli</PackageId>
+    <PackageOutputPath>../../artifacts/nupkg</PackageOutputPath>
+    <Description>Command line transpiler for CSJS: compiles C# to modern JavaScript. Run `dotnet cs2js build`.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSJS.Core\CSJS.Core.csproj" />
+    <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
+    <ProjectReference Include="..\CSJS.Testing\CSJS.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

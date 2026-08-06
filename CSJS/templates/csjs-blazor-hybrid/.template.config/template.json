@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Gravicode Studios",
+  "classifications": [
+    "CSJS",
+    "Web",
+    "Blazor"
+  ],
+  "identity": "Csjs.BlazorHybrid",
+  "name": "CSJS Blazor Hybrid",
+  "shortName": "csjs-blazor",
+  "description": "Blazor Server for page structure, CSJS for browser-side interactivity. Both halves are C#, so components can call transpiled modules through a typed JS interop wrapper.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "CsjsBlazorApp",
+  "preferNameDirectory": true,
+  "sources": [
+    {
+      "source": "./",
+      "target": "./",
+      "exclude": [
+        ".template.config/**",
+        "**/[Bb]in/**",
+        "**/[Oo]bj/**",
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/*.user",
+        "**/*.filelist",
+        "**/*.lock.json",
+        "**/.vs/**",
+        "**/wwwroot/js/*.csjs",
+        "**/wwwroot/js/*.js.map",
+        "**/.csjs-stamp"
+      ]
+    }
+  ]
+}

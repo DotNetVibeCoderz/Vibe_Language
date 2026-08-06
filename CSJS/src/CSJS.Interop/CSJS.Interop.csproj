@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CSJS</RootNamespace>
+    <AssemblyName>CSJS.Interop</AssemblyName>
+    <PackageId>CSJS.Interop</PackageId>
+    <Description>Interop attributes and browser/JavaScript API bindings for the CSJS C#-to-JavaScript transpiler.</Description>
+    <!-- These declarations are transpiled away; bodies intentionally throw. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+</Project>

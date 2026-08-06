@@ -1,0 +1,76 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using CSJS;
+
+namespace CsjsConsoleApp;
+
+/// <summary>
+/// An ordinary C# console program. Nothing here knows it is running in a browser: the host page
+/// redirects <c>console.log</c> into an on-page terminal before calling <see cref="Main"/>.
+/// </summary>
+[JsExport(Global = true)]
+public static class Program
+{
+    public static void Main()
+    {
+        Console.WriteLine("CSJS Console — berjalan di browser.");
+        Console.WriteLine();
+
+        var primes = SieveOfEratosthenes(50);
+        Console.WriteLine($"Bilangan prima sampai 50 ({primes.Count} buah):");
+        Console.WriteLine(string.Join(", ", primes));
+        Console.WriteLine();
+
+        Console.WriteLine("Deret Fibonacci:");
+        foreach (var value in Fibonacci(12))
+        {
+            Console.Write($"{value} ");
+        }
+        Console.WriteLine();
+        Console.WriteLine();
+
+        var words = new[] { "transpiler", "csharp", "javascript", "browser", "gravicode" };
+        var longest = words.OrderByDescending(w => w.Length).First();
+        Console.WriteLine($"Kata terpanjang: {longest} ({longest.Length} huruf)");
+
+        var grouped = words.GroupBy(w => w.Length > 7 ? "panjang" : "pendek");
+        foreach (var group in grouped)
+        {
+            Console.WriteLine($"  {group.Key}: {string.Join(", ", group)}");
+        }
+    }
+
+    /// <summary>Classic sieve. Plain C#, transpiled as-is.</summary>
+    private static List<int> SieveOfEratosthenes(int limit)
+    {
+        var composite = new bool[limit + 1];
+        var primes = new List<int>();
+
+        for (var n = 2; n <= limit; n++)
+        {
+            if (composite[n]) continue;
+
+            primes.Add(n);
+            for (var multiple = n * n; multiple <= limit; multiple += n)
+            {
+                composite[multiple] = true;
+            }
+        }
+
+        return primes;
+    }
+
+    /// <summary>An iterator, which becomes a JavaScript generator.</summary>
+    private static IEnumerable<int> Fibonacci(int count)
+    {
+        int a = 0, b = 1;
+        for (var i = 0; i < count; i++)
+        {
+            yield return a;
+            var next = a + b;
+            a = b;
+            b = next;
+        }
+    }
+}

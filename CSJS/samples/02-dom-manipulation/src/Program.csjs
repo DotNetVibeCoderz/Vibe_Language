@@ -1,0 +1,154 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using CSJS;
+using CSJS.Browser;
+
+namespace DomManipulation;
+
+/// <summary>A task in the list. A plain C# class; no framework, no attributes.</summary>
+public class TodoItem
+{
+    public int Id { get; set; }
+    public string Title { get; set; } = "";
+    public bool Done { get; set; }
+}
+
+/// <summary>
+/// Builds and updates DOM nodes entirely from C#.
+/// <para>
+/// The point of this sample is that <c>document.querySelector</c> and friends are reached
+/// through typed C# bindings, so the compiler catches a misspelled property before the
+/// browser ever sees it.
+/// </para>
+/// </summary>
+[JsExport(Global = true)]
+public static class TodoApp
+{
+    private static readonly List<TodoItem> Items = new();
+    private static int _nextId = 1;
+
+    public static void Start()
+    {
+        Seed();
+        Render();
+
+        var input = Document.GetElementById("new-item");
+        var addButton = Document.GetElementById("add");
+
+        addButton?.AddEventListener("click", _ => AddFromInput(input));
+
+        // Enter should add too — the same handler, reached from a keyboard event.
+        input?.AddEventListener("keydown", e =>
+        {
+            var keyboard = (KeyboardEvent)e;
+            if (keyboard.Key == "Enter") AddFromInput(input);
+        });
+    }
+
+    private static void Seed()
+    {
+        Add("Baca dokumentasi CSJS");
+        Add("Coba transpile kelas pertama");
+        Add("Deploy ke web");
+        Items[0].Done = true;
+    }
+
+    private static void AddFromInput(Element? input)
+    {
+        if (input is null) return;
+
+        var title = input.Value.Trim();
+        if (string.IsNullOrEmpty(title)) return;
+
+        Add(title);
+        input.Value = "";
+        Render();
+    }
+
+    private static void Add(string title)
+    {
+        Items.Add(new TodoItem { Id = _nextId++, Title = title });
+    }
+
+    private static void Toggle(int id)
+    {
+        var item = Items.FirstOrDefault(i => i.Id == id);
+        if (item is null) return;
+
+        item.Done = !item.Done;
+        Render();
+    }
+
+    private static void Remove(int id)
+    {
+        var item = Items.FirstOrDefault(i => i.Id == id);
+        if (item is null) return;
+
+        Items.Remove(item);
+        Render();
+    }
+
+    /// <summary>Rebuilds the list. Nodes are created and wired up, not assembled as HTML strings.</summary>
+    private static void Render()
+    {
+        var list = Document.GetElementById("list");
+        if (list is null) return;
+
+        list.InnerHtml = "";
+
+        foreach (var item in Items)
+        {
+            list.AppendChild(BuildRow(item));
+        }
+
+        UpdateSummary();
+    }
+
+    private static Element BuildRow(TodoItem item)
+    {
+        var row = Document.CreateElement("li");
+        row.ClassName = item.Done ? "row done" : "row";
+
+        var checkbox = Document.CreateElement("input");
+        checkbox.SetAttribute("type", "checkbox");
+        checkbox.Checked = item.Done;
+        // The closure captures `item`, so each row knows which task it belongs to.
+        checkbox.AddEventListener("change", _ => Toggle(item.Id));
+
+        var label = Document.CreateElement("span");
+        label.ClassName = "label";
+        label.TextContent = item.Title;
+
+        var remove = Document.CreateElement("button");
+        remove.ClassName = "remove";
+        remove.TextContent = "Hapus";
+        remove.AddEventListener("click", _ => Remove(item.Id));
+
+        row.AppendChild(checkbox);
+        row.AppendChild(label);
+        row.AppendChild(remove);
+        return row;
+    }
+
+    private static void UpdateSummary()
+    {
+        var summary = Document.GetElementById("summary");
+        if (summary is null) return;
+
+        var done = Items.Count(i => i.Done);
+        var total = Items.Count;
+
+        summary.TextContent = total == 0
+            ? "Belum ada tugas."
+            : $"{done} dari {total} selesai.";
+
+        // Percentages need care: integer division would floor this to 0 or 1.
+        var progress = Document.GetElementById("progress");
+        if (progress is not null && total > 0)
+        {
+            var percent = (double)done / total * 100;
+            progress.Style.Width = $"{percent}%";
+        }
+    }
+}

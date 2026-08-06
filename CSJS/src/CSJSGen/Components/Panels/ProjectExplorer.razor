@@ -1,0 +1,168 @@
+@* Left panel: a file tree over the open project. *@
+@implements IDisposable
+@inject ProjectService Projects
+
+<aside class="panel">
+    <div class="panel-head">
+        <span class="panel-title">Penjelajah</span>
+        @if (Projects.Current is not null)
+        {
+            <div style="display:flex; gap:2px">
+                <button class="icon-button" title="Lipat semua" @onclick="CollapseAll">⌄</button>
+                <button class="icon-button" title="Simpan semua" @onclick="() => Projects.SaveAll()">⤓</button>
+            </div>
+        }
+    </div>
+
+    <div class="panel-body">
+        @if (Projects.Current is null)
+        {
+            <div class="empty-state">
+                Belum ada proyek terbuka.<br />
+                Gunakan <strong>Berkas → Proyek baru</strong> untuk memulai.
+            </div>
+        }
+        else
+        {
+            <button class="tree-root" @onclick="ToggleRoot" title="@Projects.Current.Directory">
+                <span class="chevron @(_rootOpen ? "open" : "")">▸</span>
+                <span class="root-name">@Projects.Current.Name</span>
+            </button>
+
+            @if (_rootOpen)
+            {
+                <div class="tree">
+                    @foreach (var node in _tree)
+                    {
+                        @RenderNode(node)
+                    }
+                </div>
+            }
+        }
+    </div>
+</aside>
+
+@code {
+    private List<FileNode> _tree = new();
+    private HashSet<string> _expanded = new(StringComparer.OrdinalIgnoreCase);
+    private bool _rootOpen = true;
+    private string? _builtFor;
+
+    protected override void OnInitialized() => Projects.Changed += OnChanged;
+
+    private void OnChanged() => InvokeAsync(() =>
+    {
+        Rebuild();
+        StateHasChanged();
+    });
+
+    protected override void OnParametersSet() => Rebuild();
+
+    /// <summary>
+    /// Rebuilds the tree when the project changes. A newly opened project starts fully expanded,
+    /// because a collapsed tree hides the thing the user just asked to see.
+    /// </summary>
+    private void Rebuild()
+    {
+        if (Projects.Current is null)
+        {
+            _tree = new List<FileNode>();
+            _builtFor = null;
+            return;
+        }
+
+        _tree = FileNode.Build(Projects.Current);
+
+        if (_builtFor != Projects.Current.Directory)
+        {
+            _builtFor = Projects.Current.Directory;
+            _expanded = new HashSet<string>(FileNode.FolderPaths(_tree), StringComparer.OrdinalIgnoreCase);
+            _rootOpen = true;
+        }
+    }
+
+    private void ToggleRoot() => _rootOpen = !_rootOpen;
+
+    private void ToggleFolder(string path)
+    {
+        if (!_expanded.Remove(path)) _expanded.Add(path);
+    }
+
+    private void CollapseAll()
+    {
+        _expanded.Clear();
+        _rootOpen = true;
+    }
+
+    /// <summary>
+    /// Renders one node and, when it is an expanded folder, its children.
+    /// Recursion here rather than a flattened list keeps the markup shape matching the data.
+    /// </summary>
+    private RenderFragment RenderNode(FileNode node) => builder =>
+    {
+        var sequence = 0;
+        var indent = 6 + node.Depth * 12;
+
+        if (node.IsFolder)
+        {
+            var open = _expanded.Contains(node.RelativePath);
+
+            builder.OpenElement(sequence++, "button");
+            builder.AddAttribute(sequence++, "class", "tree-item folder");
+            builder.AddAttribute(sequence++, "style", $"padding-left:{indent}px");
+            builder.AddAttribute(sequence++, "onclick",
+                EventCallback.Factory.Create(this, () => ToggleFolder(node.RelativePath)));
+
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", $"chevron {(open ? "open" : "")}");
+            builder.AddContent(sequence++, "▸");
+            builder.CloseElement();
+
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "tree-label");
+            builder.AddContent(sequence++, node.Name);
+            builder.CloseElement();
+
+            builder.CloseElement();
+
+            if (open)
+            {
+                foreach (var child in node.Children)
+                    builder.AddContent(sequence++, RenderNode(child));
+            }
+
+            return;
+        }
+
+        var selected = Projects.ActiveFile?.Path == node.FullPath;
+
+        builder.OpenElement(sequence++, "button");
+        builder.AddAttribute(sequence++, "class", $"tree-item file {(selected ? "selected" : "")}");
+        builder.AddAttribute(sequence++, "style", $"padding-left:{indent + 14}px");
+        builder.AddAttribute(sequence++, "title", node.RelativePath);
+        builder.AddAttribute(sequence++, "onclick",
+            EventCallback.Factory.Create(this, () => Projects.SelectFile(node.FullPath)));
+
+        builder.OpenElement(sequence++, "span");
+        builder.AddAttribute(sequence++, "class", $"file-kind {node.KindClass}");
+        builder.AddContent(sequence++, node.Kind);
+        builder.CloseElement();
+
+        builder.OpenElement(sequence++, "span");
+        builder.AddAttribute(sequence++, "class", "tree-label");
+        builder.AddContent(sequence++, node.Name);
+        builder.CloseElement();
+
+        if (node.File?.IsDirty == true)
+        {
+            builder.OpenElement(sequence++, "span");
+            builder.AddAttribute(sequence++, "class", "dot");
+            builder.AddAttribute(sequence++, "title", "Belum disimpan");
+            builder.CloseElement();
+        }
+
+        builder.CloseElement();
+    };
+
+    public void Dispose() => Projects.Changed -= OnChanged;
+}

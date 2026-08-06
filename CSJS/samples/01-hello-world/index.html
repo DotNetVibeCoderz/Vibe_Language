@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSJS — Hello World</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fbfaf8;
+        --fg: #1a1917;
+        --muted: #6b6862;
+        --accent: #c2410c;
+        --card: #ffffff;
+        --border: #e7e3dc;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14130f;
+          --fg: #f2efe9;
+          --muted: #a39e94;
+          --accent: #fb923c;
+          --card: #1e1c17;
+          --border: #302d26;
+        }
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      .card {
+        width: min(34rem, 100%);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 1rem;
+        padding: 2.5rem;
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 8px 24px rgb(0 0 0 / 0.06);
+      }
+
+      .eyebrow {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+        margin: 0 0 0.75rem;
+      }
+
+      h1 {
+        margin: 0 0 0.5rem;
+        font-size: clamp(1.75rem, 4vw, 2.5rem);
+        line-height: 1.1;
+        letter-spacing: -0.02em;
+      }
+
+      p.lede {
+        margin: 0 0 2rem;
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 0.7rem 1.4rem;
+        border: none;
+        border-radius: 0.6rem;
+        background: var(--accent);
+        color: #fff;
+        cursor: pointer;
+        transition: transform 120ms ease, filter 120ms ease;
+      }
+
+      button:hover { filter: brightness(1.08); }
+      button:active { transform: translateY(1px); }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+      #output {
+        margin-top: 1.25rem;
+        min-height: 1.5rem;
+        color: var(--muted);
+        font-variant-numeric: tabular-nums;
+      }
+
+      footer {
+        margin-top: 2rem;
+        padding-top: 1.25rem;
+        border-top: 1px solid var(--border);
+        font-size: 0.8125rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <p class="eyebrow">CSJS Sample 01</p>
+      <h1 data-heading>Memuat…</h1>
+      <p class="lede">
+        Judul di atas dan tombol di bawah dikendalikan oleh kelas C# yang ditranspilasi
+        menjadi modul JavaScript. Buka konsol browser untuk melihat outputnya.
+      </p>
+
+      <button id="greet">Sapa saya</button>
+      <div id="output"></div>
+
+      <footer>Gravicode Studios — dipimpin oleh Kang Fadhil</footer>
+    </main>
+
+    <script type="module">
+      import { App } from './Program.js';
+      App.Start();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,71 @@
+@* Bottom strip: file state, compile state, and attribution. *@
+@implements IDisposable
+@inject ProjectService Projects
+@inject AppState State
+@inject ChatService Chat
+
+<footer class="statusbar">
+    @if (Projects.ActiveFile is not null)
+    {
+        <span class="status-item">
+            @System.IO.Path.GetFileName(Projects.ActiveFile.Name)
+            @(Projects.ActiveFile.IsDirty ? "•" : "")
+        </span>
+        <span class="status-item">@LineCount baris</span>
+    }
+    else
+    {
+        <span class="status-item">tidak ada berkas</span>
+    }
+
+    <span class="status-item @CompileClass">
+        <span class="status-dot"></span>
+        @CompileLabel
+    </span>
+
+    @if (Chat.IsBusy)
+    {
+        <span class="status-item">Jack sedang menjawab…</span>
+    }
+
+    <div class="spacer"></div>
+
+    <span class="status-item">@Chat.Settings.Provider · @Chat.Settings.Model</span>
+    <span class="status-item">Gravicode Studios — Kang Fadhil</span>
+</footer>
+
+@code {
+
+    // Panels read shared services directly, so they subscribe rather than waiting for a
+    // parent render to reach them.
+    protected override void OnInitialized()
+    {
+        Projects.Changed += OnChanged;
+        State.Changed += OnChanged;
+        Chat.Changed += OnChanged;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Projects.Changed -= OnChanged;
+        State.Changed -= OnChanged;
+        Chat.Changed -= OnChanged;
+    }
+
+    private int LineCount => Projects.ActiveFile?.Content.Split('\n').Length ?? 0;
+
+    private bool HasErrors => State.OutputText.Contains(" error ", StringComparison.Ordinal);
+    private bool HasCompiled => State.GeneratedJavaScript.Length > 0 || State.OutputText.Length > 0;
+
+    private string CompileClass => !HasCompiled ? "" : HasErrors ? "bad" : "ok";
+
+    private string CompileLabel => State.IsCompiling
+        ? "mengompilasi…"
+        : !HasCompiled
+            ? "belum dikompilasi"
+            : HasErrors
+                ? "ada kesalahan"
+                : "siap";
+}

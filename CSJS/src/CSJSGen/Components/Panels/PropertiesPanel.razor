@@ -1,0 +1,190 @@
+@* Right panel: facts about the active file and what compiling it produced. *@
+@implements IDisposable
+@inject ProjectService Projects
+@inject AppState State
+@inject ChatService Chat
+
+<aside class="panel" style="border-right:none; border-left:1px solid var(--edge)">
+    <div class="panel-head">
+        <span class="panel-title">Properti</span>
+    </div>
+
+    <div class="panel-body">
+        @if (Projects.ActiveFile is null)
+        {
+            <div class="empty-state">Pilih sebuah berkas untuk melihat propertinya.</div>
+        }
+        else
+        {
+            var file = Projects.ActiveFile;
+
+            <div class="prop-group">
+                <p class="prop-group-title">Berkas</p>
+                <dl style="margin:0">
+                    <div class="prop-row">
+                        <dt>Nama</dt>
+                        <dd>@System.IO.Path.GetFileName(file.Name)</dd>
+                    </div>
+                    <div class="prop-row">
+                        <dt>Jenis</dt>
+                        <dd class="source-side">@(file.IsCsjs ? "Sumber CSJS" : "Aset")</dd>
+                    </div>
+                    <div class="prop-row">
+                        <dt>Status</dt>
+                        <dd style="@(file.IsDirty ? "color:var(--output)" : "")">
+                            @(file.IsDirty ? "Belum disimpan" : "Tersimpan")
+                        </dd>
+                    </div>
+                </dl>
+            </div>
+
+            <div class="prop-group">
+                <p class="prop-group-title">Ukuran</p>
+                <dl style="margin:0">
+                    <div class="prop-row"><dt>Baris</dt><dd>@LineCount</dd></div>
+                    <div class="prop-row"><dt>Karakter</dt><dd>@file.Content.Length</dd></div>
+                    <div class="prop-row"><dt>Kosong</dt><dd>@BlankLineCount</dd></div>
+                </dl>
+            </div>
+
+            @if (State.GeneratedJavaScript.Length > 0)
+            {
+                <div class="prop-group">
+                    <p class="prop-group-title">Hasil transpilasi</p>
+                    <dl style="margin:0">
+                        <div class="prop-row">
+                            <dt>Baris JS</dt>
+                            <dd class="output-side">@State.GeneratedJavaScript.Split('\n').Length</dd>
+                        </div>
+                        <div class="prop-row">
+                            <dt>Ukuran</dt>
+                            <dd class="output-side">@FormatBytes(State.GeneratedJavaScript.Length)</dd>
+                        </div>
+                        <div class="prop-row">
+                            <dt>Rasio</dt>
+                            <dd class="output-side">@Ratio</dd>
+                        </div>
+                        <div class="prop-row">
+                            <dt>Runtime</dt>
+                            <dd>@(UsesRuntime ? "diperlukan" : "tidak dipakai")</dd>
+                        </div>
+                    </dl>
+                </div>
+            }
+
+            <div class="prop-group">
+                <p class="prop-group-title">Struktur</p>
+                @if (Symbols.Count == 0)
+                {
+                    <p style="margin:0; font-size:11.5px; color:var(--text-faint)">
+                        Belum ada tipe yang dideklarasikan.
+                    </p>
+                }
+                else
+                {
+                    <dl style="margin:0">
+                        @foreach (var symbol in Symbols)
+                        {
+                            <div class="prop-row">
+                                <dt>@symbol.Kind</dt>
+                                <dd>@symbol.Name</dd>
+                            </div>
+                        }
+                    </dl>
+                }
+            </div>
+
+            <div class="prop-group" style="border-bottom:none">
+                <p class="prop-group-title">Asisten</p>
+                <dl style="margin:0">
+                    <div class="prop-row">
+                        <dt>Penyedia</dt>
+                        <dd class="source-side">@Chat.Settings.Provider</dd>
+                    </div>
+                    <div class="prop-row"><dt>Model</dt><dd>@Chat.Settings.Model</dd></div>
+                    <div class="prop-row"><dt>Suhu</dt><dd>@Chat.Settings.Temperature</dd></div>
+                </dl>
+            </div>
+        }
+    </div>
+</aside>
+
+@code {
+
+    // Panels read shared services directly, so they subscribe rather than waiting for a
+    // parent render to reach them.
+    protected override void OnInitialized()
+    {
+        Projects.Changed += OnChanged;
+        State.Changed += OnChanged;
+        Chat.Changed += OnChanged;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Projects.Changed -= OnChanged;
+        State.Changed -= OnChanged;
+        Chat.Changed -= OnChanged;
+    }
+
+    private int LineCount => Projects.ActiveFile?.Content.Split('\n').Length ?? 0;
+
+    private int BlankLineCount => Projects.ActiveFile is null
+        ? 0
+        : Projects.ActiveFile.Content.Split('\n').Count(string.IsNullOrWhiteSpace);
+
+    private bool UsesRuntime => State.GeneratedJavaScript.Contains("csjs-runtime", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Emitted size against source size. Useful to see at a glance whether the transpiler is
+    /// producing something proportionate rather than a pile of scaffolding.
+    /// </summary>
+    private string Ratio
+    {
+        get
+        {
+            var source = Projects.ActiveFile?.Content.Length ?? 0;
+            if (source == 0) return "—";
+            return $"{(double)State.GeneratedJavaScript.Length / source:F2}×";
+        }
+    }
+
+    private sealed record Symbol(string Kind, string Name);
+
+    /// <summary>
+    /// A light scan for declared types. A full parse would be more accurate but would run on
+    /// every keystroke; this is enough to orient someone in the file.
+    /// </summary>
+    private List<Symbol> Symbols
+    {
+        get
+        {
+            var content = Projects.ActiveFile?.Content;
+            if (string.IsNullOrEmpty(content)) return new List<Symbol>();
+
+            var found = new List<Symbol>();
+            var pattern = new System.Text.RegularExpressions.Regex(
+                @"^\s*(?:public|internal|private|protected)?\s*(?:static\s+|sealed\s+|abstract\s+|partial\s+)*"
+                + @"(?<kind>class|interface|record|enum|struct)\s+(?<name>\w+)",
+                System.Text.RegularExpressions.RegexOptions.Multiline);
+
+            foreach (System.Text.RegularExpressions.Match match in pattern.Matches(content))
+            {
+                found.Add(new Symbol(
+                    match.Groups["kind"].Value,
+                    match.Groups["name"].Value));
+            }
+
+            return found;
+        }
+    }
+
+    private static string FormatBytes(int bytes) => bytes switch
+    {
+        < 1024 => $"{bytes} B",
+        < 1024 * 1024 => $"{bytes / 1024.0:F1} KB",
+        _ => $"{bytes / (1024.0 * 1024):F1} MB",
+    };
+}

@@ -1,0 +1,160 @@
+@* Project gallery. Every card is a working application, not a stub. *@
+@inject IJSRuntime Js
+@inject FolderPicker Picker
+
+<div class="overlay" @onclick="OnCancel">
+    <div class="dialog gallery-dialog" @onclick:stopPropagation>
+        <div class="dialog-head">
+            <span class="dialog-title">Proyek baru</span>
+            <button class="icon-button" @onclick="OnCancel">✕</button>
+        </div>
+
+        <div class="dialog-body">
+            <div class="field-row" style="grid-template-columns: 1fr 1.4fr">
+                <div class="field">
+                    <label for="project-name">Nama proyek</label>
+                    <input id="project-name" type="text" @bind="_name" @bind:event="oninput"
+                           placeholder="AplikasiSaya" />
+                </div>
+
+                <div class="field">
+                    <label for="project-location">Lokasi</label>
+                    <div style="display:flex; gap:6px">
+                        <input id="project-location" type="text" @bind="_location" @bind:event="oninput"
+                               style="flex:1" />
+                        <button class="button" type="button" @onclick="BrowseLocation"
+                                title="Pilih folder">Telusuri…</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="gallery-filters" style="margin-bottom: 12px">
+                <button class="gallery-filter @(_category is null ? "active" : "")"
+                        @onclick="() => _category = null">Semua</button>
+
+                @foreach (var category in ProjectTemplates.Categories)
+                {
+                    <button class="gallery-filter @(_category == category ? "active" : "")"
+                            @onclick="() => _category = category">@category</button>
+                }
+            </div>
+
+            <div class="template-grid">
+                @foreach (var template in Visible)
+                {
+                    <button class="template-card @(_selected == template.Id ? "selected" : "")"
+                            @onclick="() => Select(template)">
+                        <span class="icon">@template.Icon</span>
+                        <span style="min-width: 0">
+                            <span class="title">@template.Name</span>
+                            <span class="excerpt">@template.Description</span>
+                        </span>
+                    </button>
+                }
+            </div>
+        </div>
+
+        <div class="dialog-foot">
+            @if (_error is not null)
+            {
+                <span style="margin-right:auto; align-self:center; font-size:11.5px; color:var(--danger)">
+                    @_error
+                </span>
+            }
+            else
+            {
+                <span style="margin-right:auto; align-self:center; font-family:var(--mono);
+                             font-size:10.5px; color:var(--text-faint)">
+                    @System.IO.Path.Combine(_location, _name.Trim().Length == 0 ? "…" : _name.Trim())
+                </span>
+            }
+
+            <button class="button" @onclick="OnCancel">Batal</button>
+            <button class="button primary" @onclick="Create" disabled="@(!CanCreate)">Buat proyek</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback<(string Name, string Location, string TemplateId)> OnCreate { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private string _name = "AplikasiSaya";
+    private string _location = System.IO.Path.Combine(
+        System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments), "CSJSGen");
+
+    private string _selected = "blank";
+    private string? _category;
+    private string? _error;
+
+    private IEnumerable<ProjectTemplate> Visible => _category is null
+        ? ProjectTemplates.All
+        : ProjectTemplates.All.Where(t => t.Category == _category);
+
+    /// <summary>Picks the parent folder the new project will be created inside.</summary>
+    private async Task BrowseLocation()
+    {
+        var start = _location;
+        while (!string.IsNullOrWhiteSpace(start) && !Directory.Exists(start))
+            start = System.IO.Path.GetDirectoryName(start) ?? "";
+
+        var chosen = await Picker.PickAsync("Pilih lokasi proyek", start);
+        if (chosen is null) return;
+
+        _location = chosen;
+        StateHasChanged();
+    }
+
+    private bool CanCreate => _name.Trim().Length > 0 && _location.Trim().Length > 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Js.InvokeVoidAsync("csjsgen.focus", "#project-name");
+    }
+
+    private void Select(ProjectTemplate template)
+    {
+        _selected = template.Id;
+
+        // Naming the project after the template saves a step, but only while the name is still
+        // whatever the last template put there.
+        if (_name.Trim().Length == 0 || WasSuggested(_name))
+            _name = Suggest(template);
+
+        _error = null;
+    }
+
+    private static readonly HashSet<string> Suggested = new(StringComparer.Ordinal) { "AplikasiSaya" };
+
+    private static bool WasSuggested(string name) => Suggested.Contains(name.Trim());
+
+    private static string Suggest(ProjectTemplate template)
+    {
+        // Strip anything that would be awkward in a folder name.
+        var cleaned = new string(template.Name.Where(char.IsLetterOrDigit).ToArray());
+        var name = cleaned.Length > 0 ? cleaned : "AplikasiSaya";
+        Suggested.Add(name);
+        return name;
+    }
+
+    private async Task Create()
+    {
+        var name = _name.Trim();
+        var location = _location.Trim();
+
+        if (name.Any(c => System.IO.Path.GetInvalidFileNameChars().Contains(c)))
+        {
+            _error = "Nama proyek mengandung karakter yang tidak diizinkan.";
+            return;
+        }
+
+        var target = System.IO.Path.Combine(location, name);
+        if (Directory.Exists(target) && Directory.EnumerateFileSystemEntries(target).Any())
+        {
+            _error = $"{target} sudah ada dan tidak kosong.";
+            return;
+        }
+
+        await OnCreate.InvokeAsync((name, location, _selected));
+    }
+}

@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSJS — Three.js</title>
+
+    <!--
+      three.js is resolved from a CDN via an import map. The transpiled module does
+      `import { Scene, Mesh, ... } from 'three'` exactly as hand-written JavaScript would,
+      so no bundler is required to run this page.
+    -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.169.0/build/three.module.js"
+        }
+      }
+    </script>
+
+    <style>
+      :root {
+        color-scheme: dark;
+        --fg: #f2efe9;
+        --muted: #a39e94;
+        --accent: #fb923c;
+        --border: rgb(255 255 255 / 0.12);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: radial-gradient(ellipse at 50% 0%, #221f19 0%, #0d0c0a 60%);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        display: flex;
+        flex-direction: column;
+      }
+
+      header {
+        padding: 1.5rem 2rem 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+
+      .eyebrow {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+        margin: 0 0 0.35rem;
+      }
+
+      h1 { margin: 0; font-size: 1.5rem; letter-spacing: -0.02em; font-weight: 600; }
+      .hint { margin: 0.35rem 0 0; font-size: 0.875rem; color: var(--muted); }
+
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 0.55rem 1.2rem;
+        border: 1px solid var(--border);
+        border-radius: 0.6rem;
+        background: rgb(255 255 255 / 0.06);
+        color: var(--fg);
+        cursor: pointer;
+        backdrop-filter: blur(8px);
+        transition: background 150ms ease, transform 100ms ease;
+      }
+
+      button:hover { background: rgb(255 255 255 / 0.12); }
+      button:active { transform: translateY(1px); }
+
+      #scene {
+        flex: 1;
+        min-height: 26rem;
+        margin: 1.25rem 2rem 0;
+        border-radius: 1rem;
+        overflow: hidden;
+        border: 1px solid var(--border);
+        cursor: grab;
+        touch-action: none;
+      }
+
+      #scene:active { cursor: grabbing; }
+      #scene canvas { display: block; }
+
+      footer {
+        padding: 1.25rem 2rem 1.5rem;
+        font-size: 0.8125rem;
+        color: var(--muted);
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div>
+        <p class="eyebrow">CSJS Sample 04</p>
+        <h1>Scene 3D dari C#</h1>
+        <p class="hint">Seret untuk memutar kamera. Seluruh scene ini ditulis dalam C#.</p>
+      </div>
+      <button id="toggle">Jeda</button>
+    </header>
+
+    <div id="scene"></div>
+
+    <footer>Gravicode Studios — dipimpin oleh Kang Fadhil</footer>
+
+    <script type="module">
+      import { SceneApp } from './Program.js';
+      SceneApp.Start();
+    </script>
+  </body>
+</html>

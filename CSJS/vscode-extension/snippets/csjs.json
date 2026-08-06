@@ -1,0 +1,94 @@
+{
+  "Browser entry point": {
+    "prefix": "csjsapp",
+    "description": "A class the host page can call into.",
+    "body": [
+      "using System;",
+      "using CSJS;",
+      "using CSJS.Browser;",
+      "",
+      "/// <summary>${1:What this does.}</summary>",
+      "[JsExport(Global = true)]",
+      "public static class ${2:App}",
+      "{",
+      "    public static void Start()",
+      "    {",
+      "        $0",
+      "    }",
+      "}"
+    ]
+  },
+
+  "JavaScript library binding": {
+    "prefix": "csjsimport",
+    "description": "Bind to a class from a JavaScript module.",
+    "body": [
+      "[JsImport(\"${1:module}\", \"${2:Export}\")]",
+      "public class ${2:Export}",
+      "{",
+      "    public ${2:Export}($3) => throw new JsExternException();",
+      "    $0",
+      "}"
+    ]
+  },
+
+  "Options object literal": {
+    "prefix": "csjsoptions",
+    "description": "A type emitted as a plain JavaScript object literal.",
+    "body": [
+      "[JsObjectLiteral]",
+      "public class ${1:Options}",
+      "{",
+      "    [JsName(\"${2:key}\")] public ${3:string} ${4:Value} { get; set; } = ${5:\"\"};",
+      "    $0",
+      "}"
+    ]
+  },
+
+  "Global binding": {
+    "prefix": "csjsglobal",
+    "description": "Bind to an existing JavaScript global.",
+    "body": [
+      "[JsGlobal(\"${1:globalName}\")]",
+      "public static class ${2:Binding}",
+      "{",
+      "    public static ${3:void} ${4:Method}($5) => throw new JsExternException();",
+      "    $0",
+      "}"
+    ]
+  },
+
+  "Event handler": {
+    "prefix": "csjson",
+    "description": "Attach a DOM event handler.",
+    "body": [
+      "Document.GetElementById(\"${1:id}\")?.AddEventListener(\"${2:click}\", _ =>",
+      "{",
+      "    $0",
+      "});"
+    ]
+  },
+
+  "Raw JavaScript body": {
+    "prefix": "csjsbody",
+    "description": "A method whose body is written directly in JavaScript.",
+    "body": [
+      "[JsBody(\"${1:return 0;}\")]",
+      "public static ${2:double} ${3:Method}($4) => throw new JsExternException();"
+    ]
+  },
+
+  "Test": {
+    "prefix": "csjstest",
+    "description": "A CSJS test that runs on the JavaScript runtime.",
+    "body": [
+      "[CsjsTest(\"${1:describes what is verified}\")]",
+      "public static void ${2:Name}()",
+      "{",
+      "    ${3:var actual = 1 + 1;}",
+      "    Assert.Equal(${4:2}, ${5:actual});",
+      "    $0",
+      "}"
+    ]
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "name": "HelloWorld",
+  "source": "src",
+  "output": "dist",
+  "module": "esm",
+  "typeDefinitions": true,
+  "sourceMaps": true,
+  "html": "index.html"
+}

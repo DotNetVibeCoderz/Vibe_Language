@@ -1,0 +1,106 @@
+@* Below the seam: everything that is a product of compiling. *@
+@implements IDisposable
+@inject AppState State
+@inject IJSRuntime Js
+
+<div class="output-pane @(_collapsed ? "collapsed" : "")">
+    <div class="output-tabs">
+        <button class="output-tab @(State.OutputTab == "output" ? "active" : "")"
+                @onclick='() => Select("output")'>
+            Keluaran
+            @if (ErrorCount > 0)
+            {
+                <span class="badge-count error">@ErrorCount</span>
+            }
+            else if (WarningCount > 0)
+            {
+                <span class="badge-count warning">@WarningCount</span>
+            }
+        </button>
+
+        <button class="output-tab @(State.OutputTab == "javascript" ? "active" : "")"
+                @onclick='() => Select("javascript")'>JavaScript</button>
+
+        <button class="output-tab @(State.OutputTab == "types" ? "active" : "")"
+                @onclick='() => Select("types")'>Deklarasi .d.ts</button>
+
+        <div class="spacer"></div>
+
+        @if (CurrentText.Length > 0)
+        {
+            <button class="icon-button" title="Salin" @onclick="Copy">⧉</button>
+        }
+
+        <button class="icon-button" title="@(_collapsed ? "Buka" : "Tutup")"
+                @onclick="() => _collapsed = !_collapsed">
+            @(_collapsed ? "▴" : "▾")
+        </button>
+    </div>
+
+    @if (!_collapsed)
+    {
+        <div class="output-body">
+            @if (CurrentText.Length == 0)
+            {
+                <span style="color:var(--text-faint)">
+                    @(State.OutputTab switch
+                    {
+                        "javascript" => "Tekan Compile untuk melihat JavaScript yang dihasilkan.",
+                        "types" => "Tekan Compile untuk melihat deklarasi TypeScript.",
+                        _ => "Belum ada keluaran.",
+                    })
+                </span>
+            }
+            else
+            {
+                @CurrentText
+            }
+        </div>
+    }
+</div>
+
+@code {
+
+    // Panels read shared services directly, so they subscribe rather than waiting for a
+    // parent render to reach them.
+    protected override void OnInitialized()
+    {
+        State.Changed += OnChanged;
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        State.Changed -= OnChanged;
+    }
+
+    private bool _collapsed;
+
+    private string CurrentText => State.OutputTab switch
+    {
+        "javascript" => State.GeneratedJavaScript,
+        "types" => State.GeneratedTypes,
+        _ => State.OutputText,
+    };
+
+    /// <summary>
+    /// Counts are read from the output text rather than kept separately, so the badge can never
+    /// disagree with what the pane is showing.
+    /// </summary>
+    private int ErrorCount => CountLines(" error ");
+    private int WarningCount => CountLines(" warning ");
+
+    private int CountLines(string marker) => State.OutputText
+        .Split('\n')
+        .Count(line => line.Contains(marker, StringComparison.Ordinal));
+
+    private void Select(string tab)
+    {
+        State.OutputTab = tab;
+        _collapsed = false;
+        State.Notify();
+    }
+
+    private async Task Copy() => await Js.InvokeAsync<bool>("csjsgen.copyText", CurrentText);
+}

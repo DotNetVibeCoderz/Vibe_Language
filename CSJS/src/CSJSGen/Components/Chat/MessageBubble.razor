@@ -1,0 +1,86 @@
+@* One message. Assistant replies render as Markdown; user messages stay plain. *@
+@inject MarkdownRenderer Markdown
+
+<div class="message @RoleClass">
+    <div class="message-head">
+        <span class="message-who">@Who</span>
+        <span class="message-time">@Message.Timestamp.ToString("HH:mm")</span>
+    </div>
+
+    <div class="message-body">
+        @if (Message.Role == ChatRole.Assistant)
+        {
+            @Markdown.ToHtml(Message.Content)
+
+            @if (Message.IsStreaming)
+            {
+                <span class="typing-cursor"></span>
+            }
+        }
+        else
+        {
+            @* User text is shown verbatim: rendering it as Markdown would mangle pasted code. *@
+            <div style="white-space:pre-wrap">@Message.Content</div>
+        }
+
+        @if (Message.Attachments.Count > 0)
+        {
+            <div class="attachment-row">
+                @foreach (var attachment in Message.Attachments)
+                {
+                    @if (attachment.IsImage)
+                    {
+                        <img class="attachment-thumb" src="@attachment.Url" alt="@attachment.FileName" />
+                    }
+                    else
+                    {
+                        <span class="attachment-chip">
+                            <span>📄</span>
+                            <span>@attachment.FileName</span>
+                            <span class="size">@attachment.DisplaySize</span>
+                        </span>
+                    }
+                }
+            </div>
+        }
+
+        @if (Message.Error is not null)
+        {
+            <div class="message-error">@Message.Error</div>
+        }
+    </div>
+
+    @if (Message.Role == ChatRole.Assistant && !Message.IsStreaming && CodeToApply is not null)
+    {
+        <div style="margin-top:8px">
+            <button class="code-apply" @onclick="() => OnApplyCode.InvokeAsync(CodeToApply)">
+                ↳ Terapkan ke editor
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ChatMessage Message { get; set; } = new();
+    [Parameter] public EventCallback<string> OnApplyCode { get; set; }
+
+    private string RoleClass => Message.Role switch
+    {
+        ChatRole.User => "user",
+        ChatRole.Assistant => "assistant",
+        _ => "system",
+    };
+
+    private string Who => Message.Role switch
+    {
+        ChatRole.User => "Anda",
+        ChatRole.Assistant => "Jack",
+        _ => "Sistem",
+    };
+
+    /// <summary>
+    /// The first CSJS-looking code block, if there is one. Only shown when there is something
+    /// worth applying, so the button never appears on a plain prose answer.
+    /// </summary>
+    private string? CodeToApply => MarkdownRenderer.FirstCsjsBlock(Message.Content);
+}

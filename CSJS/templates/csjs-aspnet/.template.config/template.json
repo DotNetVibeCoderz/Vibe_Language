@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Gravicode Studios",
+  "classifications": [
+    "CSJS",
+    "Web",
+    "ASP.NET"
+  ],
+  "identity": "Csjs.AspNet",
+  "name": "CSJS ASP.NET + JS",
+  "shortName": "csjs-aspnet",
+  "description": "An ASP.NET Core app whose browser code is written in C#. The build transpiles C# to JavaScript automatically before the server starts.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "CsjsAspNetApp",
+  "preferNameDirectory": true,
+  "sources": [
+    {
+      "source": "./",
+      "target": "./",
+      "exclude": [
+        ".template.config/**",
+        "**/[Bb]in/**",
+        "**/[Oo]bj/**",
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/*.user",
+        "**/*.filelist",
+        "**/*.lock.json",
+        "**/.vs/**",
+        "**/wwwroot/js/*.csjs",
+        "**/wwwroot/js/*.js.map",
+        "**/.csjs-stamp"
+      ]
+    }
+  ]
+}

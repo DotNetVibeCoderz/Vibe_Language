@@ -1,0 +1,253 @@
+@* Jack The Code Bender: multi-session chat with attachments, streaming, and tool use. *@
+@implements IDisposable
+@inject ChatService Chat
+@inject AppState State
+@inject AttachmentService Attachments
+@inject ProjectService Projects
+@inject IJSRuntime Js
+
+<section class="chat">
+
+    <header class="chat-head">
+        <div class="jack-mark">J</div>
+        <div style="min-width:0; flex:1">
+            <div class="jack-name">Jack The Code Bender</div>
+            <div class="jack-model">@Chat.Settings.Provider · @Chat.Settings.Model</div>
+        </div>
+
+        <button class="icon-button" title="Sesi baru" @onclick="() => Chat.CreateSession()">＋</button>
+        <button class="icon-button" title="Reset sesi ini" @onclick="Reset">⟲</button>
+        <button class="icon-button" title="Pengaturan" @onclick="() => _showSettings = true">⚙</button>
+        <button class="icon-button" title="Sembunyikan" @onclick="() => State.ShowChat = false">✕</button>
+    </header>
+
+    <div class="session-bar">
+        @foreach (var session in Chat.Sessions)
+        {
+            <div class="session-chip @(session.Id == Chat.ActiveSession.Id ? "active" : "")"
+                 @onclick="() => Chat.SelectSession(session.Id)">
+                <span class="label">@session.Title</span>
+                @if (Chat.Sessions.Count > 1)
+                {
+                    <button class="close" title="Hapus sesi" @onclick:stopPropagation
+                            @onclick="() => Chat.DeleteSession(session.Id)">✕</button>
+                }
+            </div>
+        }
+    </div>
+
+    <div class="transcript" id="transcript">
+        @if (Chat.ActiveSession.IsEmpty)
+        {
+            <PromptGallery OnPick="UsePrompt" />
+        }
+        else
+        {
+            @foreach (var message in Chat.ActiveSession.Messages)
+            {
+                <MessageBubble Message="message" OnApplyCode="ApplyCode" />
+            }
+        }
+    </div>
+
+    <div class="composer">
+        @if (_pending.Count > 0)
+        {
+            <div class="attachment-row" style="margin-bottom:8px">
+                @foreach (var attachment in _pending)
+                {
+                    <span class="attachment-chip">
+                        <span>@(attachment.IsImage ? "🖼" : "📄")</span>
+                        <span>@attachment.FileName</span>
+                        <span class="size">@attachment.DisplaySize</span>
+                        <button title="Hapus" @onclick="() => RemoveAttachment(attachment)">✕</button>
+                    </span>
+                }
+            </div>
+        }
+
+        <div class="composer-box">
+            <textarea id="composer-input"
+                      class="composer-input"
+                      placeholder="Minta Jack membuat, menjelaskan, atau memperbaiki kode CSJS…"
+                      @bind="_draft"
+                      @bind:event="oninput"
+                      @onkeydown="OnKeyDown"></textarea>
+
+            <div class="composer-actions">
+                <button class="icon-button" title="Lampirkan gambar" @onclick="() => AttachAsync(true)">🖼</button>
+                <button class="icon-button" title="Lampirkan dokumen" @onclick="() => AttachAsync(false)">📎</button>
+
+                @if (Projects.ActiveFile is not null)
+                {
+                    <button class="icon-button" title="Sisipkan kode dari editor" @onclick="InsertEditorCode">⌘</button>
+                }
+
+                @if (Chat.IsBusy)
+                {
+                    <button class="send-button stop" @onclick="Stop">■ Hentikan</button>
+                }
+                else
+                {
+                    <button class="send-button" @onclick="Send"
+                            disabled="@(_draft.Trim().Length == 0 && _pending.Count == 0)">
+                        Kirim ↵
+                    </button>
+                }
+            </div>
+        </div>
+
+        <p class="composer-hint">Enter kirim · Shift+Enter baris baru</p>
+    </div>
+</section>
+
+@if (_showSettings)
+{
+    <SettingsDialog OnClose="() => _showSettings = false" />
+}
+
+@if (_attachRequest is not null)
+{
+    <TextPromptDialog Title="@(_attachRequest.Value ? "Lampirkan gambar" : "Lampirkan dokumen")"
+                      Label="Lokasi berkas"
+                      Value=""
+                      Placeholder="@PlaceholderFor(_attachRequest.Value)"
+                      OnConfirm="ConfirmAttach"
+                      OnCancel="() => _attachRequest = null" />
+}
+
+@code {
+    private string _draft = "";
+    private readonly List<Attachment> _pending = new();
+    private bool _showSettings;
+    private bool? _attachRequest;
+    private CancellationTokenSource? _cancellation;
+
+    protected override void OnInitialized() => Chat.Changed += OnChanged;
+
+    private async void OnChanged()
+    {
+        await InvokeAsync(StateHasChanged);
+
+        // Follow the stream only when the user is already at the bottom, so scrolling back
+        // through a long answer is not yanked away from them.
+        try
+        {
+            if (await Js.InvokeAsync<bool>("csjsgen.isNearBottom", "#transcript"))
+                await Js.InvokeVoidAsync("csjsgen.scrollToBottom", "#transcript");
+        }
+        catch (JSDisconnectedException)
+        {
+            // The WebView is going away; nothing to scroll.
+        }
+    }
+
+    private async Task Send()
+    {
+        var text = _draft;
+        var attachments = _pending.ToList();
+
+        _draft = "";
+        _pending.Clear();
+
+        _cancellation = new CancellationTokenSource();
+        await Chat.SendAsync(text, attachments, _cancellation.Token);
+    }
+
+    private void Stop()
+    {
+        _cancellation?.Cancel();
+        _cancellation = null;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        // Enter sends; Shift+Enter is a newline. This is the convention every chat UI uses.
+        if (e.Key == "Enter" && !e.ShiftKey)
+        {
+            if (Chat.IsBusy) return;
+            if (_draft.Trim().Length == 0 && _pending.Count == 0) return;
+            await Send();
+        }
+    }
+
+    private void Reset()
+    {
+        Chat.ResetSession();
+        _draft = "";
+        _pending.Clear();
+    }
+
+    private void UsePrompt(PromptTemplate template)
+    {
+        _draft = template.Prompt.Trim();
+        StateHasChanged();
+    }
+
+    /// <summary>Puts the editor's current code into the draft, fenced so the model reads it as code.</summary>
+    private void InsertEditorCode()
+    {
+        var code = Projects.ActiveFile?.Content;
+        if (string.IsNullOrWhiteSpace(code)) return;
+
+        var name = Projects.ActiveFile is null ? "kode" : System.IO.Path.GetFileName(Projects.ActiveFile.Name);
+        var block = $"Berikut isi {name}:\n\n```csharp\n{code.TrimEnd()}\n```\n\n";
+
+        _draft = _draft.Length > 0 ? block + _draft : block;
+        StateHasChanged();
+    }
+
+    /// <summary>Writes a code block from a message straight into the editor.</summary>
+    private void ApplyCode(string code)
+    {
+        if (Projects.ActiveFile is null)
+        {
+            State.OutputText = "Buka atau buat berkas terlebih dahulu sebelum menerapkan kode.";
+            State.Notify();
+            return;
+        }
+
+        Projects.UpdateActiveContent(code);
+        State.OutputText = "Kode dari Jack diterapkan ke editor.";
+        State.Notify();
+    }
+
+    // ---- Attachments ---------------------------------------------------------------------
+
+    private void AttachAsync(bool isImage) => _attachRequest = isImage;
+
+    private static string PlaceholderFor(bool isImage) => isImage
+        ? @"C:\path\ke\gambar.png"
+        : @"C:\path\ke\dokumen.pdf";
+
+    private async Task ConfirmAttach(string path)
+    {
+        _attachRequest = null;
+        if (string.IsNullOrWhiteSpace(path)) return;
+
+        try
+        {
+            var attachment = await Attachments.AddAsync(path.Trim());
+            _pending.Add(attachment);
+        }
+        catch (Exception ex)
+        {
+            State.OutputText = $"Gagal melampirkan: {ex.Message}";
+            State.Notify();
+        }
+
+        StateHasChanged();
+    }
+
+    private void RemoveAttachment(Attachment attachment)
+    {
+        _pending.Remove(attachment);
+        Attachments.Remove(attachment);
+    }
+
+    public void Dispose()
+    {
+        Chat.Changed -= OnChanged;
+        _cancellation?.Dispose();
+    }
+}

@@ -1,0 +1,185 @@
+@* AI settings. Everything here is persisted to app.config, as the spec requires. *@
+@inject ChatService Chat
+@inject AppState State
+@inject IJSRuntime Js
+
+<div class="overlay" @onclick="OnClose">
+    <div class="dialog" @onclick:stopPropagation>
+        <div class="dialog-head">
+            <span class="dialog-title">Pengaturan asisten</span>
+            <button class="icon-button" @onclick="OnClose">✕</button>
+        </div>
+
+        <div class="dialog-body">
+
+            <div class="field">
+                <label for="provider">Penyedia</label>
+                <select id="provider" value="@_settings.Provider" @onchange="OnProviderChanged">
+                    @foreach (var provider in Enum.GetValues<AiProvider>())
+                    {
+                        <option value="@provider">@provider</option>
+                    }
+                </select>
+                <p class="help">
+                    @(_settings.Provider == AiProvider.Ollama
+                        ? "Ollama berjalan lokal dan tidak memerlukan kunci API."
+                        : "Kunci dapat diisi di sini atau lewat variabel lingkungan.")
+                </p>
+            </div>
+
+            <div class="field">
+                <label for="model">Model</label>
+                <input id="model" type="text" list="model-options" @bind="_settings.Model" />
+                <datalist id="model-options">
+                    @foreach (var model in AppSettings.ModelsFor(_settings.Provider))
+                    {
+                        <option value="@model" />
+                    }
+                </datalist>
+            </div>
+
+            @if (_settings.Provider != AiProvider.Ollama)
+            {
+                <div class="field">
+                    <label for="apikey">Kunci API</label>
+                    <input id="apikey" type="password" @bind="_settings.ApiKey"
+                           placeholder="@KeyPlaceholder" />
+                    <p class="help">@KeyHelp</p>
+                </div>
+            }
+
+            <div class="field">
+                <label for="endpoint">Endpoint</label>
+                <input id="endpoint" type="text" @bind="_settings.Endpoint"
+                       placeholder="@EndpointPlaceholder" />
+                <p class="help">Kosongkan untuk memakai endpoint bawaan penyedia.</p>
+            </div>
+
+            <div class="field-row">
+                <div class="field">
+                    <label for="temperature">
+                        Suhu <span class="range-value">@_settings.Temperature.ToString("F2")</span>
+                    </label>
+                    <input id="temperature" type="range" min="0" max="2" step="0.05"
+                           @bind="_settings.Temperature" @bind:event="oninput" />
+                    <p class="help">Rendah untuk kode, tinggi untuk ide.</p>
+                </div>
+
+                <div class="field">
+                    <label for="topp">
+                        Top-p <span class="range-value">@_settings.TopP.ToString("F2")</span>
+                    </label>
+                    <input id="topp" type="range" min="0" max="1" step="0.05"
+                           @bind="_settings.TopP" @bind:event="oninput" />
+                    <p class="help">Batas kumulatif probabilitas token.</p>
+                </div>
+            </div>
+
+            <div class="field">
+                <label for="maxtokens">Token maksimum</label>
+                <input id="maxtokens" type="number" min="256" max="32768" step="256"
+                       @bind="_settings.MaxTokens" />
+            </div>
+
+            <div class="field">
+                <label for="prompt">Persona (system prompt)</label>
+                <textarea id="prompt" rows="9" @bind="_settings.SystemPrompt"></textarea>
+                <p class="help">
+                    Menentukan bagaimana Jack berperilaku. Perubahan berlaku pada pesan berikutnya.
+                </p>
+            </div>
+
+            <div class="field" style="margin-bottom:0">
+                <label for="tavily">Kunci Tavily</label>
+                <input id="tavily" type="password" @bind="_settings.TavilyApiKey"
+                       placeholder="Opsional" />
+                <p class="help">Mengaktifkan fungsi pencarian internet.</p>
+            </div>
+        </div>
+
+        <div class="dialog-foot">
+            @if (_saved)
+            {
+                <span style="margin-right:auto; align-self:center; font-family:var(--mono);
+                             font-size:11px; color:var(--success)">Tersimpan</span>
+            }
+            <button class="button" @onclick="OnClose">Batal</button>
+            <button class="button primary" @onclick="Save">Simpan</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private AppSettings _settings = new();
+    private bool _saved;
+
+    protected override void OnInitialized()
+    {
+        // Edit a copy so cancelling genuinely cancels.
+        var current = Chat.Settings;
+        _settings = new AppSettings
+        {
+            Provider = current.Provider,
+            Model = current.Model,
+            ApiKey = current.ApiKey,
+            Endpoint = current.Endpoint,
+            Temperature = current.Temperature,
+            MaxTokens = current.MaxTokens,
+            TopP = current.TopP,
+            SystemPrompt = current.SystemPrompt,
+            TavilyApiKey = current.TavilyApiKey,
+            Theme = current.Theme,
+        };
+    }
+
+    /// <summary>
+    /// Switching provider reloads that provider's stored model, key, and endpoint, so the
+    /// fields never show one provider's settings under another's name.
+    /// </summary>
+    private void OnProviderChanged(ChangeEventArgs e)
+    {
+        if (!Enum.TryParse<AiProvider>(e.Value?.ToString(), out var provider)) return;
+
+        _settings.Provider = provider;
+        _settings.ApplyProviderSettings();
+    }
+
+    private async Task Save()
+    {
+        _settings.Theme = State.Theme;
+        _settings.Save();
+        Chat.UpdateSettings(_settings);
+
+        _saved = true;
+        StateHasChanged();
+
+        await Task.Delay(700);
+        await OnClose.InvokeAsync();
+    }
+
+    private string KeyPlaceholder => _settings.Provider switch
+    {
+        AiProvider.OpenAI => "sk-…",
+        AiProvider.Anthropic => "sk-ant-…",
+        AiProvider.Gemini => "AIza…",
+        _ => "",
+    };
+
+    private string KeyHelp => _settings.Provider switch
+    {
+        AiProvider.OpenAI => "Dibaca dari OPENAI_API_KEY bila dikosongkan.",
+        AiProvider.Anthropic => "Dibaca dari ANTHROPIC_API_KEY bila dikosongkan.",
+        AiProvider.Gemini => "Dibaca dari GEMINI_API_KEY bila dikosongkan.",
+        _ => "",
+    };
+
+    private string EndpointPlaceholder => _settings.Provider switch
+    {
+        AiProvider.OpenAI => "https://api.openai.com/v1",
+        AiProvider.Anthropic => "https://api.anthropic.com/v1",
+        AiProvider.Ollama => "http://localhost:11434",
+        _ => "",
+    };
+}

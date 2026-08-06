@@ -1,0 +1,46 @@
+@* Shown when a session is empty: starter prompts, grouped by what they teach. *@
+
+<div class="gallery">
+    <p class="gallery-lead">Halo, saya Jack.</p>
+    <p class="gallery-sub">
+        Saya menulis C# yang berjalan sebagai JavaScript. Pilih titik awal, atau tanyakan apa saja.
+    </p>
+
+    <div class="gallery-filters">
+        <button class="gallery-filter @(_category is null ? "active" : "")"
+                @onclick="() => _category = null">Semua</button>
+
+        @foreach (var category in PromptLibrary.Categories)
+        {
+            <button class="gallery-filter @(_category == category ? "active" : "")"
+                    @onclick="() => _category = category">@category</button>
+        }
+    </div>
+
+    <div class="gallery-grid">
+        @foreach (var template in Visible)
+        {
+            <button class="prompt-card" @onclick="() => OnPick.InvokeAsync(template)">
+                <span class="icon">@template.Icon</span>
+                <span style="min-width:0">
+                    <span class="title">@template.Title</span>
+                    <span class="excerpt">@Excerpt(template.Prompt)</span>
+                </span>
+            </button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback<PromptTemplate> OnPick { get; set; }
+
+    private string? _category;
+
+    private IEnumerable<PromptTemplate> Visible => _category is null
+        ? PromptLibrary.All
+        : PromptLibrary.InCategory(_category);
+
+    /// <summary>Collapses the prompt to a single line for the card.</summary>
+    private static string Excerpt(string prompt)
+        => string.Join(" ", prompt.Split('\n').Select(l => l.Trim()).Where(l => l.Length > 0));
+}

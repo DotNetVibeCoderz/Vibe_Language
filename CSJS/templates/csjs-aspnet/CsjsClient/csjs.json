@@ -1,0 +1,8 @@
+{
+  "name": "CsjsAspNetApp.Client",
+  "source": "src",
+  "output": "../wwwroot/js",
+  "module": "esm",
+  "typeDefinitions": true,
+  "sourceMaps": true
+}

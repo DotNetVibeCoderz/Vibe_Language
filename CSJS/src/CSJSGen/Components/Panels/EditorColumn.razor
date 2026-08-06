@@ -1,0 +1,499 @@
+@* Centre column: tabs, the Monaco editor, the seam, and the output pane. *@
+@implements IDisposable
+@inject ProjectService Projects
+@inject AppState State
+@inject EditorBridge Bridge
+@inject NodeRunner Runner
+@inject IJSRuntime Js
+
+<div class="editor-column">
+
+    <div class="tab-strip">
+        @if (Projects.Current is null || Projects.Current.Files.Count == 0)
+        {
+            <div style="display:flex; align-items:center; padding:0 12px;
+                        font-family:var(--mono); font-size:11px; color:var(--text-faint)">
+                tidak ada berkas
+            </div>
+        }
+        else
+        {
+            @foreach (var file in Projects.Current.Files.Where(f => f.IsCsjs))
+            {
+                <button class="tab @(Projects.ActiveFile?.Path == file.Path ? "active" : "")"
+                        @onclick="() => SwitchTo(file.Path)">
+                    <span>@System.IO.Path.GetFileName(file.Name)</span>
+                    @if (file.IsDirty)
+                    {
+                        <span class="dirty" title="Belum disimpan"></span>
+                    }
+                    <span class="tab-close" @onclick:stopPropagation
+                          @onclick="() => Projects.CloseFile(file.Path)">✕</span>
+                </button>
+            }
+        }
+    </div>
+
+    <div class="code-surface">
+        @* Monaco is created once and kept; switching files swaps its content rather than
+           rebuilding the editor, which preserves undo history and is far cheaper. *@
+        <div class="monaco-host @(Projects.ActiveFile is null ? "hidden" : "")">
+            <StandaloneCodeEditor @ref="_editor"
+                                  Id="csjs-editor"
+                                  ConstructionOptions="BuildOptions"
+                                  OnDidInit="OnEditorReady"
+                                  OnDidChangeModelContent="OnContentChanged"
+                                  OnDidChangeCursorPosition="OnCursorMoved"
+                                  CssClass="monaco-fill" />
+        </div>
+
+        @if (Projects.ActiveFile is null)
+        {
+            <div class="empty-state" style="margin:auto; max-width:340px">
+                Tidak ada berkas terbuka.<br />
+                Buat proyek baru, atau minta Jack membuatkan kode untuk Anda.
+            </div>
+        }
+    </div>
+
+    @* The seam: source above, emitted output below. It pulses when a compile runs. *@
+    <div class="seam @(_pulsing ? "pulsing" : "")"></div>
+
+    <OutputPane />
+</div>
+
+@code {
+    private StandaloneCodeEditor? _editor;
+    private bool _ready;
+    private bool _suppressChange;
+    private string? _loadedPath;
+
+    private bool _pulsing;
+    private int _caretLine = 1;
+    private int _caretColumn = 1;
+
+    public int CaretLine => _caretLine;
+    public int CaretColumn => _caretColumn;
+
+    protected override void OnInitialized()
+    {
+        EditorCommands.Invoked += OnCommand;
+        State.Changed += OnStateChanged;
+
+        // Like every other panel, this one listens for itself. Leaning on the parent's render to
+        // reach it leaves the editor showing a file the rest of the app has already moved off.
+        Projects.Changed += OnProjectChanged;
+
+        // Kernel functions read and write the editor through this bridge, so Jack can inspect
+        // what the user is looking at and change it in place.
+        Bridge.Connect(
+            () => Projects.ActiveFile?.Content,
+            code =>
+            {
+                Projects.UpdateActiveContent(code);
+                InvokeAsync(async () =>
+                {
+                    await PushToEditor(code);
+                    StateHasChanged();
+                });
+            });
+    }
+
+    /// <summary>
+    /// Monaco's construction options. C# is a built-in language, so highlighting, bracket
+    /// matching, and folding come for free rather than being hand-rolled.
+    /// </summary>
+    private StandaloneEditorConstructionOptions BuildOptions(StandaloneCodeEditor editor) => new()
+    {
+        Language = "csharp",
+        Theme = MonacoTheme,
+        Value = Projects.ActiveFile?.Content ?? "",
+        AutomaticLayout = true,
+        FontFamily = "ui-monospace, 'Cascadia Code', 'JetBrains Mono', Menlo, monospace",
+        FontSize = 13,
+        LineHeight = 21,
+        LineNumbers = State.ShowLineNumbers ? "on" : "off",
+        TabSize = 4,
+        InsertSpaces = true,
+        RenderWhitespace = "selection",
+        // A minimap costs horizontal space the editor needs more, on a three-panel layout.
+        Minimap = new EditorMinimapOptions { Enabled = false },
+        Scrollbar = new EditorScrollbarOptions { VerticalScrollbarSize = 10, HorizontalScrollbarSize = 10 },
+        ScrollBeyondLastLine = false,
+        SmoothScrolling = true,
+        CursorBlinking = "smooth",
+        RoundedSelection = false,
+        Padding = new EditorPaddingOptions { Top = 12, Bottom = 12 },
+        BracketPairColorization = new BracketPairColorizationOptions { Enabled = true },
+        FormatOnPaste = true,
+        Placeholder = "// Tulis C# di sini. Tekan Compile untuk melihat JavaScript-nya.",
+    };
+
+    private string MonacoTheme => State.Theme == "light" ? "csjs-light" : "csjs-dark";
+
+    private async Task OnEditorReady()
+    {
+        await DefineThemes();
+        await Global.SetTheme(Js, MonacoTheme);
+
+        _ready = true;
+        await LoadActiveFile();
+    }
+
+    /// <summary>
+    /// Themes matching the app's palette, so the editor belongs to the same design system rather
+    /// than looking like a component dropped into it.
+    /// </summary>
+    private async Task DefineThemes()
+    {
+        await Global.DefineTheme(Js, "csjs-dark", new StandaloneThemeData
+        {
+            Base = "vs-dark",
+            Inherit = true,
+            Rules = new List<TokenThemeRule>
+            {
+                new() { Token = "comment", Foreground = "6b6681", FontStyle = "italic" },
+                new() { Token = "keyword", Foreground = "c792ea" },
+                new() { Token = "string", Foreground = "a3d99b" },
+                new() { Token = "number", Foreground = "f0a868" },
+                new() { Token = "type", Foreground = "7fd1e8" },
+                new() { Token = "annotation", Foreground = "a78bfa" },
+            },
+            Colors = new Dictionary<string, string>
+            {
+                ["editor.background"] = "#131120",
+                ["editor.foreground"] = "#e9e6f2",
+                ["editorLineNumber.foreground"] = "#4a4560",
+                ["editorLineNumber.activeForeground"] = "#a78bfa",
+                ["editorCursor.foreground"] = "#a78bfa",
+                ["editor.selectionBackground"] = "#3b3357",
+                ["editor.lineHighlightBackground"] = "#1a1730",
+                ["editorIndentGuide.background"] = "#262236",
+                ["editorGutter.background"] = "#131120",
+            },
+        });
+
+        await Global.DefineTheme(Js, "csjs-light", new StandaloneThemeData
+        {
+            Base = "vs",
+            Inherit = true,
+            Rules = new List<TokenThemeRule>
+            {
+                new() { Token = "comment", Foreground = "8b8599", FontStyle = "italic" },
+                new() { Token = "keyword", Foreground = "7c3aed" },
+                new() { Token = "string", Foreground = "2f7a35" },
+                new() { Token = "number", Foreground = "b45309" },
+                new() { Token = "type", Foreground = "0369a1" },
+                new() { Token = "annotation", Foreground = "7c3aed" },
+            },
+            Colors = new Dictionary<string, string>
+            {
+                ["editor.background"] = "#ebe9f2",
+                ["editor.foreground"] = "#1c1a26",
+                ["editorLineNumber.foreground"] = "#a9a3bd",
+                ["editorLineNumber.activeForeground"] = "#7c3aed",
+                ["editorCursor.foreground"] = "#7c3aed",
+                ["editorGutter.background"] = "#ebe9f2",
+            },
+        });
+    }
+
+    // ---- Keeping Monaco and the project in step -----------------------------------------
+
+    private async Task SwitchTo(string path)
+    {
+        Projects.SelectFile(path);
+        await LoadActiveFile();
+    }
+
+    /// <summary>Loads the active file into Monaco without treating it as a user edit.</summary>
+    private async Task LoadActiveFile()
+    {
+        if (!_ready || _editor is null || Projects.ActiveFile is null) return;
+        if (_loadedPath == Projects.ActiveFile.Path) return;
+
+        _loadedPath = Projects.ActiveFile.Path;
+        await ApplyLanguage(Projects.ActiveFile.Path);
+        await PushToEditor(Projects.ActiveFile.Content);
+    }
+
+    /// <summary>
+    /// A project holds more than C#: the host page, the config, stylesheets. Selecting one of
+    /// those has to retune Monaco, otherwise it keeps colouring the file as C# — and the editor
+    /// ends up naming a different file than the properties panel and the status bar do.
+    /// </summary>
+    private async Task ApplyLanguage(string path)
+    {
+        if (_editor is null) return;
+
+        var model = await _editor.GetModel();
+        if (model is null) return;
+
+        var language = System.IO.Path.GetExtension(path).ToLowerInvariant() switch
+        {
+            ".csjs" or ".cs" => "csharp",
+            ".html" or ".htm" => "html",
+            ".css" => "css",
+            ".json" => "json",
+            ".js" or ".mjs" => "javascript",
+            ".ts" => "typescript",
+            _ => "plaintext",
+        };
+
+        await Global.SetModelLanguage(Js, model, language);
+    }
+
+    /// <summary>
+    /// Writes text into Monaco. The change event fires back, so it is suppressed — otherwise the
+    /// file would be marked dirty simply by being opened.
+    /// </summary>
+    private async Task PushToEditor(string content)
+    {
+        if (!_ready || _editor is null) return;
+
+        _suppressChange = true;
+        try
+        {
+            await _editor.SetValue(content);
+        }
+        finally
+        {
+            _suppressChange = false;
+        }
+    }
+
+    private async Task OnContentChanged(ModelContentChangedEvent e)
+    {
+        if (_suppressChange || _editor is null) return;
+
+        var text = await _editor.GetValue();
+        Projects.UpdateActiveContent(text);
+    }
+
+    private void OnCursorMoved(CursorPositionChangedEvent e)
+    {
+        _caretLine = e.Position.LineNumber;
+        _caretColumn = e.Position.Column;
+        State.Notify();
+    }
+
+    /// <summary>
+    /// The project changed under us — a file was selected, a project opened or closed. Re-render,
+    /// then bring Monaco to whatever is active now.
+    /// </summary>
+    private void OnProjectChanged()
+        => InvokeAsync(async () =>
+        {
+            // A closed file leaves nothing loaded, so reopening it later still counts as a change.
+            if (Projects.ActiveFile is null) _loadedPath = null;
+
+            StateHasChanged();
+            await LoadActiveFile();
+        });
+
+    /// <summary>Applies theme and gutter changes made elsewhere in the app.</summary>
+    private async void OnStateChanged()
+    {
+        if (!_ready || _editor is null) return;
+
+        await InvokeAsync(async () =>
+        {
+            await Global.SetTheme(Js, MonacoTheme);
+            await _editor.UpdateOptions(new EditorUpdateOptions
+            {
+                LineNumbers = State.ShowLineNumbers ? "on" : "off",
+            });
+        });
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // A file opened from elsewhere — the explorer, a new project — has to reach Monaco.
+        if (_ready && Projects.ActiveFile is not null && _loadedPath != Projects.ActiveFile.Path)
+            await LoadActiveFile();
+    }
+
+    // ---- Menu commands -------------------------------------------------------------------
+
+    /// <summary>
+    /// Editing commands are Monaco's own actions. Reimplementing find, replace, or formatting on
+    /// top of a real editor would be strictly worse than triggering what it already has.
+    /// </summary>
+    private async void OnCommand(string command)
+    {
+        if (_editor is null) return;
+
+        var action = command switch
+        {
+            "cut" => "editor.action.clipboardCutAction",
+            "copy" => "editor.action.clipboardCopyAction",
+            "paste" => "editor.action.clipboardPasteAction",
+            "goto" => "editor.action.gotoLine",
+            "find" => "actions.find",
+            "replace" => "editor.action.startFindReplaceAction",
+            "format" => "editor.action.formatDocument",
+            "comment" => "editor.action.commentLine",
+            "fold" => "editor.foldAll",
+            "unfold" => "editor.unfoldAll",
+            _ => null,
+        };
+
+        if (action is null) return;
+
+        await _editor.Focus();
+        await _editor.Trigger("csjsgen", action);
+
+        // Monaco's formatter for C# is whitespace-only, so the transpiler's own view of the code
+        // is unaffected; the file is still marked dirty because the text changed.
+        if (command == "format")
+        {
+            var text = await _editor.GetValue();
+            Projects.UpdateActiveContent(text);
+            State.OutputText = "Kode dirapikan.";
+            State.Notify();
+        }
+    }
+
+    // ---- Compile and run -----------------------------------------------------------------
+
+    /// <summary>Transpiles and shows the result, pulsing the seam while it happens.</summary>
+    public async Task CompileAsync()
+    {
+        await SyncFromEditor();
+
+        State.IsCompiling = true;
+        _pulsing = true;
+        State.Notify();
+        StateHasChanged();
+
+        // Yield so the pulse renders before the compile occupies the thread.
+        await Task.Delay(1);
+
+        var result = await Task.Run(() => Projects.Compile());
+
+        State.GeneratedJavaScript = result.JavaScript;
+        State.GeneratedTypes = result.TypeDefinitions ?? "";
+        State.OutputText = FormatDiagnostics(result);
+        State.OutputTab = result.Success ? "javascript" : "output";
+        State.IsCompiling = false;
+        State.Notify();
+
+        await MarkProblems(result);
+
+        await Task.Delay(900);
+        _pulsing = false;
+        StateHasChanged();
+    }
+
+    /// <summary>Compiles, then executes the result on Node and shows what it printed.</summary>
+    public async Task RunAsync()
+    {
+        await SyncFromEditor();
+
+        State.IsCompiling = true;
+        _pulsing = true;
+        State.OutputTab = "output";
+        State.OutputText = "Menjalankan…";
+        State.Notify();
+        StateHasChanged();
+
+        await Task.Delay(1);
+
+        // A project is built and run whole. Running just the open file compiles it without its
+        // siblings, and a file that references one of them fails with C# "type not found" errors
+        // that have nothing to do with what is actually wrong.
+        if (Projects.Current is { Directory.Length: > 0 } project)
+        {
+            Projects.SaveAll();
+            State.OutputText = "";
+
+            // Output arrives as the process produces it, so a service that never exits is still
+            // watchable — and the Stop button is what ends it.
+            var result = await Runner.RunAsync(project.Directory, line =>
+                InvokeAsync(() =>
+                {
+                    State.OutputText += line + "\n";
+                    State.Notify();
+                }));
+
+            State.OutputText += (State.OutputText.Length > 0 ? "\n" : "") + result.Output;
+        }
+        else
+        {
+            var plugin = new Kernel.CsjsPlugin(() => Projects.ActiveFile?.Content);
+            State.OutputText = await plugin.RunAsync();
+        }
+
+        State.IsCompiling = false;
+        State.Notify();
+
+        await Task.Delay(900);
+        _pulsing = false;
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Pulls Monaco's text before compiling. The change event is debounced by Monaco, so the
+    /// project could otherwise be a keystroke behind what the user sees.
+    /// </summary>
+    private async Task SyncFromEditor()
+    {
+        if (!_ready || _editor is null) return;
+        Projects.UpdateActiveContent(await _editor.GetValue());
+    }
+
+    /// <summary>
+    /// Puts transpiler diagnostics in the editor's margin, where an error belongs — rather than
+    /// only in a pane the user has to look away to read.
+    /// </summary>
+    private async Task MarkProblems(CompileResult result)
+    {
+        if (!_ready || _editor is null || Projects.ActiveFile is null) return;
+
+        var model = await _editor.GetModel();
+        if (model is null) return;
+
+        var name = System.IO.Path.GetFileName(Projects.ActiveFile.Name);
+
+        var markers = result.Diagnostics
+            .Where(d => d.FilePath is null
+                        || System.IO.Path.GetFileName(d.FilePath).Equals(name, StringComparison.OrdinalIgnoreCase))
+            .Where(d => d.Line > 0)
+            .Select(d => new MarkerData
+            {
+                Message = $"{d.Id}: {d.Message}",
+                Severity = d.Severity == CSJS.Core.DiagnosticSeverity.Error
+                    ? MarkerSeverity.Error
+                    : MarkerSeverity.Warning,
+                StartLineNumber = d.Line,
+                StartColumn = d.Column,
+                EndLineNumber = d.Line,
+                EndColumn = d.Column + 20,
+            })
+            .ToList();
+
+        await Global.SetModelMarkers(Js, model, "csjs", markers);
+    }
+
+    private static string FormatDiagnostics(CompileResult result)
+    {
+        if (result.Diagnostics.Count == 0)
+            return result.Success ? "Kompilasi berhasil tanpa peringatan." : "Kompilasi gagal.";
+
+        var report = new System.Text.StringBuilder();
+        report.AppendLine(result.Success ? "Kompilasi berhasil." : "Kompilasi gagal.");
+        report.AppendLine();
+
+        foreach (var diagnostic in result.Diagnostics)
+            report.AppendLine(diagnostic.ToString());
+
+        return report.ToString();
+    }
+
+    public void Dispose()
+    {
+        EditorCommands.Invoked -= OnCommand;
+        State.Changed -= OnStateChanged;
+        Projects.Changed -= OnProjectChanged;
+    }
+}

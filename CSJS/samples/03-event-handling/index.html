@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSJS — Event Handling</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fbfaf8;
+        --fg: #1a1917;
+        --muted: #6b6862;
+        --accent: #c2410c;
+        --card: #ffffff;
+        --border: #e7e3dc;
+        --key: #f5f3ef;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #14130f;
+          --fg: #f2efe9;
+          --muted: #a39e94;
+          --accent: #fb923c;
+          --card: #1e1c17;
+          --border: #302d26;
+          --key: #26241e;
+        }
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 2rem 1.5rem;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+
+      .card {
+        width: min(22rem, 100%);
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 1.25rem;
+        padding: 1.5rem;
+        box-shadow: 0 1px 2px rgb(0 0 0 / 0.04), 0 12px 32px rgb(0 0 0 / 0.08);
+      }
+
+      .eyebrow {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+        margin: 0 0 1rem;
+        text-align: center;
+      }
+
+      #display {
+        font-size: 2.25rem;
+        font-weight: 300;
+        text-align: right;
+        padding: 1rem 0.75rem;
+        margin-bottom: 1rem;
+        border-radius: 0.75rem;
+        background: var(--key);
+        font-variant-numeric: tabular-nums;
+        overflow-x: auto;
+        white-space: nowrap;
+        transition: background 150ms ease;
+      }
+
+      #display.pulse { background: color-mix(in oklab, var(--accent) 18%, var(--key)); }
+
+      .pad { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.5rem; }
+
+      button {
+        font: inherit;
+        font-size: 1.125rem;
+        padding: 0.9rem 0;
+        border: none;
+        border-radius: 0.65rem;
+        background: var(--key);
+        color: var(--fg);
+        cursor: pointer;
+        transition: transform 100ms ease, filter 100ms ease;
+      }
+
+      button:hover { filter: brightness(0.96); }
+      button:active { transform: scale(0.96); }
+      button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+      button.op { background: color-mix(in oklab, var(--accent) 14%, var(--key)); font-weight: 600; }
+      button.primary { background: var(--accent); color: #fff; font-weight: 600; }
+      button.primary:hover { filter: brightness(1.08); }
+      button.wide { grid-column: span 2; }
+
+      .hint { margin-top: 1rem; font-size: 0.8125rem; color: var(--muted); text-align: center; }
+
+      footer {
+        margin-top: 1.25rem;
+        padding-top: 1rem;
+        border-top: 1px solid var(--border);
+        font-size: 0.75rem;
+        color: var(--muted);
+        text-align: center;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <p class="eyebrow">CSJS Sample 03</p>
+
+      <div id="display">0</div>
+
+      <div class="pad">
+        <button data-op="clear">AC</button>
+        <button data-op="negate">±</button>
+        <button class="op" data-op="divide">÷</button>
+        <button class="op" data-op="multiply">×</button>
+
+        <button data-digit="7">7</button>
+        <button data-digit="8">8</button>
+        <button data-digit="9">9</button>
+        <button class="op" data-op="subtract">−</button>
+
+        <button data-digit="4">4</button>
+        <button data-digit="5">5</button>
+        <button data-digit="6">6</button>
+        <button class="op" data-op="add">+</button>
+
+        <button data-digit="1">1</button>
+        <button data-digit="2">2</button>
+        <button data-digit="3">3</button>
+        <button class="primary" data-op="equals" style="grid-row: span 2">=</button>
+
+        <button class="wide" data-digit="0">0</button>
+        <button data-digit=".">.</button>
+      </div>
+
+      <p class="hint">Keyboard juga bekerja — angka, + − × ÷, Enter, Esc.</p>
+
+      <footer>Gravicode Studios — dipimpin oleh Kang Fadhil</footer>
+    </main>
+
+    <script type="module">
+      import { CalculatorApp } from './Program.js';
+      CalculatorApp.Start();
+    </script>
+  </body>
+</html>

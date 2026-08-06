@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Gravicode Studios",
+  "classifications": [
+    "CSJS",
+    "Web",
+    "Console"
+  ],
+  "identity": "Csjs.ConsoleToWeb",
+  "name": "CSJS Console to Web",
+  "shortName": "csjs-console",
+  "description": "A C# console program that runs in the browser. Console.WriteLine is routed to an on-page terminal, so existing console logic works unchanged.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "CsjsConsoleApp",
+  "preferNameDirectory": true,
+  "symbols": {
+    "Framework": {
+      "type": "parameter",
+      "description": "The target framework.",
+      "datatype": "choice",
+      "choices": [
+        {
+          "choice": "net10.0",
+          "description": ".NET 10"
+        }
+      ],
+      "defaultValue": "net10.0",
+      "replaces": "net10.0"
+    }
+  },
+  "sources": [
+    {
+      "source": "./",
+      "target": "./",
+      "exclude": [
+        ".template.config/**",
+        "**/[Bb]in/**",
+        "**/[Oo]bj/**",
+        "**/dist/**",
+        "**/node_modules/**",
+        "**/*.user",
+        "**/*.filelist",
+        "**/*.lock.json",
+        "**/.vs/**",
+        "**/wwwroot/js/*.csjs",
+        "**/wwwroot/js/*.js.map",
+        "**/.csjs-stamp"
+      ]
+    }
+  ]
+}

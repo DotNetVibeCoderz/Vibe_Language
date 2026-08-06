@@ -1,0 +1,74 @@
+@* A draggable divider between two panels. *@
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<div class="splitter @(_dragging ? "dragging" : "")"
+     role="separator"
+     aria-orientation="vertical"
+     aria-label="@Label"
+     tabindex="0"
+     @onpointerdown="StartDrag"
+     @onkeydown="OnKeyDown"></div>
+
+@code {
+    /// <summary>Current width of the panel being resized.</summary>
+    [Parameter, EditorRequired] public double Width { get; set; }
+
+    /// <summary>Raised with the new width as the user drags.</summary>
+    [Parameter, EditorRequired] public EventCallback<double> WidthChanged { get; set; }
+
+    /// <summary>
+    /// Which way the panel grows. A splitter to the left of its panel has to invert the delta,
+    /// because dragging right makes that panel narrower.
+    /// </summary>
+    [Parameter] public bool GrowsLeft { get; set; }
+
+    [Parameter] public string Label { get; set; } = "Ubah lebar panel";
+
+    private bool _dragging;
+    private DotNetObjectReference<Splitter>? _self;
+
+    /// <summary>
+    /// Dragging is tracked in JavaScript rather than through Blazor pointer events, because a
+    /// pointermove per frame through interop would lag behind the cursor visibly.
+    /// </summary>
+    private async Task StartDrag(PointerEventArgs e)
+    {
+        _dragging = true;
+        _self ??= DotNetObjectReference.Create(this);
+        await Js.InvokeVoidAsync("csjsgen.beginResize", _self, e.ClientX, Width, GrowsLeft);
+    }
+
+    [JSInvokable]
+    public async Task OnResize(double width) => await WidthChanged.InvokeAsync(width);
+
+    [JSInvokable]
+    public Task OnResizeEnd()
+    {
+        _dragging = false;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    /// <summary>Arrow keys resize too, so the splitter is reachable without a pointer.</summary>
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        var step = e.ShiftKey ? 32 : 8;
+
+        var delta = e.Key switch
+        {
+            "ArrowLeft" => GrowsLeft ? step : -step,
+            "ArrowRight" => GrowsLeft ? -step : step,
+            _ => 0,
+        };
+
+        if (delta == 0) return;
+        await WidthChanged.InvokeAsync(Width + delta);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _self?.Dispose();
+        await ValueTask.CompletedTask;
+    }
+}

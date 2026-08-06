@@ -1,0 +1,210 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "CSJS",
+  "scopeName": "source.csjs",
+
+  "//": "A .csjs file is C#, so the grammar follows C# closely. What it adds is the CSJS layer: the interop attributes are highlighted distinctly, because whether a declaration is a binding or a real type is the single most important thing to see at a glance in this language.",
+
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#interop-attributes" },
+    { "include": "#attributes" },
+    { "include": "#strings" },
+    { "include": "#keywords" },
+    { "include": "#types" },
+    { "include": "#numbers" },
+    { "include": "#declarations" },
+    { "include": "#operators" }
+  ],
+
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.block.documentation.csjs",
+          "begin": "///",
+          "end": "$",
+          "patterns": [
+            {
+              "name": "entity.name.tag.csjs",
+              "match": "</?[a-zA-Z][a-zA-Z0-9]*(?:\\s+[a-zA-Z]+=\"[^\"]*\")*\\s*/?>"
+            }
+          ]
+        },
+        { "name": "comment.line.double-slash.csjs", "match": "//.*$" },
+        { "name": "comment.block.csjs", "begin": "/\\*", "end": "\\*/" }
+      ]
+    },
+
+    "interop-attributes": {
+      "//": "The CSJS-specific attributes decide whether code is emitted, imported, or erased.",
+      "patterns": [
+        {
+          "name": "meta.attribute.interop.csjs",
+          "begin": "(\\[)\\s*(JsGlobal|JsName|JsImport|JsExport|JsBody|JsTemplate|JsIgnore|JsObjectLiteral)\\b",
+          "beginCaptures": {
+            "1": { "name": "punctuation.definition.attribute.csjs" },
+            "2": { "name": "entity.name.function.decorator.csjs" }
+          },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.attribute.csjs" } },
+          "patterns": [
+            { "include": "#strings" },
+            { "name": "variable.parameter.csjs", "match": "\\b[A-Za-z_]\\w*(?=\\s*[:=])" },
+            { "name": "constant.language.csjs", "match": "\\b(true|false|null)\\b" },
+            { "include": "#numbers" }
+          ]
+        }
+      ]
+    },
+
+    "attributes": {
+      "patterns": [
+        {
+          "name": "meta.attribute.csjs",
+          "begin": "(\\[)\\s*(?=[A-Z])",
+          "beginCaptures": { "1": { "name": "punctuation.definition.attribute.csjs" } },
+          "end": "\\]",
+          "endCaptures": { "0": { "name": "punctuation.definition.attribute.csjs" } },
+          "patterns": [
+            { "include": "#strings" },
+            { "name": "entity.name.type.attribute.csjs", "match": "\\b[A-Z]\\w*\\b" },
+            { "include": "#numbers" }
+          ]
+        }
+      ]
+    },
+
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.interpolated.csjs",
+          "begin": "\\$\"",
+          "end": "\"",
+          "patterns": [
+            { "name": "constant.character.escape.csjs", "match": "\\\\." },
+            {
+              "name": "meta.interpolation.csjs",
+              "begin": "\\{",
+              "end": "\\}",
+              "beginCaptures": { "0": { "name": "punctuation.definition.interpolation.csjs" } },
+              "endCaptures": { "0": { "name": "punctuation.definition.interpolation.csjs" } },
+              "patterns": [
+                { "include": "#keywords" },
+                { "include": "#numbers" },
+                { "name": "variable.other.csjs", "match": "\\b\\w+\\b" }
+              ]
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.double.raw.csjs",
+          "begin": "\"\"\"",
+          "end": "\"\"\""
+        },
+        {
+          "name": "string.quoted.double.verbatim.csjs",
+          "begin": "@\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.csjs", "match": "\"\"" }]
+        },
+        {
+          "name": "string.quoted.double.csjs",
+          "begin": "\"",
+          "end": "\"",
+          "patterns": [{ "name": "constant.character.escape.csjs", "match": "\\\\." }]
+        },
+        {
+          "name": "string.quoted.single.csjs",
+          "begin": "'",
+          "end": "'",
+          "patterns": [{ "name": "constant.character.escape.csjs", "match": "\\\\." }]
+        }
+      ]
+    },
+
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.control.csjs",
+          "match": "\\b(if|else|switch|case|default|for|foreach|in|while|do|break|continue|return|goto|yield|throw|try|catch|finally|when|await|using|lock|checked|unchecked)\\b"
+        },
+        {
+          "name": "storage.modifier.csjs",
+          "match": "\\b(public|private|protected|internal|static|readonly|const|abstract|virtual|override|sealed|partial|async|extern|new|ref|out|in|params|this|base|required|init|file)\\b"
+        },
+        {
+          "name": "storage.type.csjs",
+          "match": "\\b(class|interface|struct|enum|record|delegate|event|namespace|var|void|operator|implicit|explicit|where|get|set)\\b"
+        },
+        {
+          "name": "keyword.operator.expression.csjs",
+          "match": "\\b(is|as|typeof|sizeof|nameof|new|default|stackalloc|with)\\b"
+        },
+        {
+          "name": "constant.language.csjs",
+          "match": "\\b(true|false|null)\\b"
+        }
+      ]
+    },
+
+    "types": {
+      "patterns": [
+        {
+          "name": "keyword.type.csjs",
+          "match": "\\b(bool|byte|sbyte|char|decimal|double|float|int|uint|long|ulong|short|ushort|object|string|dynamic|nint|nuint)\\b"
+        },
+        {
+          "//": "Browser bindings read as types even though they are static classes.",
+          "name": "support.class.browser.csjs",
+          "match": "\\b(Document|Window|Element|Node|Event|MouseEvent|KeyboardEvent|Storage|Location|JsConsole|JsObject|Json|Http|Response|Timers|ClassList|Style|DomRect|Text)\\b"
+        },
+        {
+          "name": "support.class.bcl.csjs",
+          "match": "\\b(List|Dictionary|HashSet|IEnumerable|IList|ICollection|IDictionary|Task|ValueTask|Action|Func|Predicate|Comparison|Math|Console|String|StringBuilder|DateTime|TimeSpan|Random|Convert|Exception|Nullable|Array|Tuple|KeyValuePair|IGrouping)\\b"
+        },
+        {
+          "name": "entity.name.type.csjs",
+          "match": "\\b[A-Z]\\w*(?=\\s*[<(\\s\\[])"
+        }
+      ]
+    },
+
+    "numbers": {
+      "patterns": [
+        { "name": "constant.numeric.hex.csjs", "match": "\\b0[xX][0-9a-fA-F_]+[uUlL]*\\b" },
+        { "name": "constant.numeric.binary.csjs", "match": "\\b0[bB][01_]+[uUlL]*\\b" },
+        { "name": "constant.numeric.csjs", "match": "\\b[0-9][0-9_]*(\\.[0-9_]+)?([eE][+-]?[0-9]+)?[fFdDmMuUlL]*\\b" }
+      ]
+    },
+
+    "declarations": {
+      "patterns": [
+        {
+          "match": "\\b(class|interface|struct|enum|record)\\s+([A-Za-z_]\\w*)",
+          "captures": {
+            "1": { "name": "storage.type.csjs" },
+            "2": { "name": "entity.name.type.declaration.csjs" }
+          }
+        },
+        {
+          "//": "A method declaration: an identifier immediately followed by a parameter list.",
+          "match": "\\b([A-Za-z_]\\w*)\\s*(?=\\()",
+          "captures": { "1": { "name": "entity.name.function.csjs" } }
+        }
+      ]
+    },
+
+    "operators": {
+      "patterns": [
+        { "name": "keyword.operator.null.csjs", "match": "\\?\\?=?|\\?\\.|\\?\\[" },
+        { "name": "keyword.operator.lambda.csjs", "match": "=>" },
+        { "name": "keyword.operator.assignment.csjs", "match": "(\\+|-|\\*|/|%|&|\\||\\^|<<|>>)?=" },
+        { "name": "keyword.operator.comparison.csjs", "match": "==|!=|<=|>=|<|>" },
+        { "name": "keyword.operator.logical.csjs", "match": "&&|\\|\\||!" },
+        { "name": "keyword.operator.arithmetic.csjs", "match": "\\+\\+|--|\\+|-|\\*|/|%" },
+        { "name": "keyword.operator.range.csjs", "match": "\\.\\.|\\^" }
+      ]
+    }
+  }
+}

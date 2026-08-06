@@ -1,0 +1,227 @@
+@page "/"
+@using CSJS.Core
+@inject IJSRuntime Js
+@inject ReferenceLoader References
+
+<PageTitle>CSJS Playground</PageTitle>
+
+<div class="shell">
+    <header class="bar">
+        <div class="brand">
+            <span class="brand-mark">CSJS</span>
+            <span class="brand-sub">Playground</span>
+        </div>
+
+        <select class="sample-picker" @onchange="LoadSample">
+            <option value="">Muat contoh…</option>
+            @foreach (var sample in Samples.All)
+            {
+                <option value="@sample.Name">@sample.Name</option>
+            }
+        </select>
+
+        <div class="spacer"></div>
+
+        <label class="toggle">
+            <input type="checkbox" @bind="_autoRun" />
+            <span>Transpile otomatis</span>
+        </label>
+
+        <button class="run" @onclick="Transpile" disabled="@_busy">
+            @(_busy ? "…" : "⟳") Transpile
+        </button>
+    </header>
+
+    <main class="panes">
+        <section class="pane source-pane">
+            <div class="pane-head">
+                <span class="pane-title">C#</span>
+                <span class="pane-meta">@_source.Split('\n').Length baris</span>
+            </div>
+            <textarea class="code" spellcheck="false"
+                      value="@_source" @oninput="OnSourceChanged"></textarea>
+        </section>
+
+        @* The seam: source on the left, emitted output on the right. *@
+        <div class="seam @(_pulsing ? "pulsing" : "")"></div>
+
+        <section class="pane output-pane">
+            <div class="pane-head">
+                <div class="tabs">
+                    <button class="tab @(_tab == "js" ? "active" : "")" @onclick='() => _tab = "js"'>JavaScript</button>
+                    <button class="tab @(_tab == "dts" ? "active" : "")" @onclick='() => _tab = "dts"'>.d.ts</button>
+                    <button class="tab @(_tab == "log" ? "active" : "")" @onclick='() => _tab = "log"'>
+                        Diagnostik
+                        @if (_errorCount > 0)
+                        {
+                            <span class="count error">@_errorCount</span>
+                        }
+                        else if (_warningCount > 0)
+                        {
+                            <span class="count warning">@_warningCount</span>
+                        }
+                    </button>
+                </div>
+
+                <button class="copy" @onclick="Copy" title="Salin">⧉</button>
+            </div>
+
+            <pre class="code readonly">@CurrentOutput</pre>
+        </section>
+    </main>
+
+    <footer class="bar footer">
+        <span class="status @StatusClass">@Status</span>
+        <div class="spacer"></div>
+        <span class="credit">Gravicode Studios — dipimpin oleh Kang Fadhil</span>
+    </footer>
+</div>
+
+@code {
+    private string _source = Samples.All[0].Code;
+    private string _javascript = "";
+    private string _typeDefinitions = "";
+    private string _log = "";
+    private string _tab = "js";
+
+    private bool _busy;
+    private bool _pulsing;
+    private bool _autoRun = true;
+    private bool _success = true;
+    private int _errorCount;
+    private int _warningCount;
+    private double _elapsedMs;
+
+    private CancellationTokenSource? _debounce;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Transpile();
+    }
+
+    private string CurrentOutput => _tab switch
+    {
+        "dts" => _typeDefinitions.Length > 0 ? _typeDefinitions : "(belum ada deklarasi)",
+        "log" => _log.Length > 0 ? _log : "(tidak ada diagnostik)",
+        _ => _javascript.Length > 0 ? _javascript : "(belum ada keluaran)",
+    };
+
+    private string Status => _busy
+        ? "Mentranspilasi…"
+        : _success
+            ? $"Berhasil dalam {_elapsedMs:F0} ms" + (_warningCount > 0 ? $" · {_warningCount} peringatan" : "")
+            : $"{_errorCount} kesalahan";
+
+    private string StatusClass => _busy ? "" : _success ? "ok" : "bad";
+
+    private async Task OnSourceChanged(ChangeEventArgs e)
+    {
+        _source = e.Value?.ToString() ?? "";
+        if (!_autoRun) return;
+
+        // Debounce: transpiling on every keystroke would run Roslyn continuously on the single
+        // WebAssembly thread and make typing stutter.
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+
+        try
+        {
+            await Task.Delay(450, token);
+            if (!token.IsCancellationRequested) await Transpile();
+        }
+        catch (TaskCanceledException)
+        {
+            // Superseded by a later keystroke.
+        }
+    }
+
+    private async Task Transpile()
+    {
+        _busy = true;
+        _pulsing = true;
+        StateHasChanged();
+
+        // Yield so the pulse renders before the compile occupies the thread.
+        await Task.Delay(1);
+
+        var started = DateTime.UtcNow;
+
+        var options = new TranspileOptions
+        {
+            EmitSourceMap = false,
+            EmitTypeDefinitions = true,
+        };
+
+        options.ReferenceImages.AddRange(await References.GetAsync());
+
+        TranspileResult result;
+        try
+        {
+            result = new Transpiler(options).TranspileSource(_source, "Playground.csjs");
+        }
+        catch (Exception ex)
+        {
+            _success = false;
+            _log = $"Transpiler gagal: {ex.Message}";
+            _tab = "log";
+            _busy = false;
+            _pulsing = false;
+            StateHasChanged();
+            return;
+        }
+
+        _elapsedMs = (DateTime.UtcNow - started).TotalMilliseconds;
+        _success = result.Success;
+        _errorCount = result.Errors.Count();
+        _warningCount = result.Warnings.Count();
+
+        _log = result.Diagnostics.Count > 0
+            ? string.Join('\n', result.Diagnostics.Select(d => d.ToString()))
+            : "";
+
+        if (result.Success && result.Modules.Count > 0)
+        {
+            _javascript = result.Modules[0].JavaScript;
+            _typeDefinitions = result.Modules[0].TypeDefinitions ?? "";
+            if (_tab == "log" && _errorCount == 0) _tab = "js";
+        }
+        else
+        {
+            _javascript = "";
+            _typeDefinitions = "";
+            _tab = "log";
+        }
+
+        _busy = false;
+        StateHasChanged();
+
+        await Task.Delay(800);
+        _pulsing = false;
+        StateHasChanged();
+    }
+
+    private async Task LoadSample(ChangeEventArgs e)
+    {
+        var name = e.Value?.ToString();
+        if (string.IsNullOrEmpty(name)) return;
+
+        var sample = Samples.All.FirstOrDefault(s => s.Name == name);
+        if (sample is null) return;
+
+        _source = sample.Code;
+        await Transpile();
+    }
+
+    private async Task Copy()
+    {
+        try
+        {
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", CurrentOutput);
+        }
+        catch (JSException)
+        {
+            // Clipboard access can be blocked; there is nothing useful to say about it.
+        }
+    }
+}

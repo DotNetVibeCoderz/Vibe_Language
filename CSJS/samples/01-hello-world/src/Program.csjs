@@ -1,0 +1,49 @@
+using System;
+using CSJS;
+using CSJS.Browser;
+
+namespace HelloWorld;
+
+/// <summary>
+/// The smallest useful CSJS program: a C# class transpiled to a JavaScript module and called
+/// from plain HTML. Everything here is ordinary C#; nothing is JavaScript-specific except the
+/// browser bindings.
+/// </summary>
+[JsExport(Global = true)]
+public static class App
+{
+    private static int _greetCount;
+
+    /// <summary>Called from index.html once the module has loaded.</summary>
+    public static void Start()
+    {
+        Console.WriteLine("Hello from C#, running as JavaScript.");
+
+        var heading = Document.QuerySelector("[data-heading]");
+        if (heading is not null)
+        {
+            heading.TextContent = Greet("Dunia");
+        }
+
+        var button = Document.GetElementById("greet");
+        button?.AddEventListener("click", _ => OnGreet());
+    }
+
+    /// <summary>Builds a greeting. Plain C# — string interpolation and all.</summary>
+    public static string Greet(string name) => $"Halo, {name}!";
+
+    private static void OnGreet()
+    {
+        _greetCount++;
+
+        var output = Document.GetElementById("output");
+        if (output is null) return;
+
+        // Integer division truncates here exactly as it does in C#.
+        var average = _greetCount / 2;
+
+        output.TextContent = _greetCount == 1
+            ? "Diklik 1 kali."
+            : $"Diklik {_greetCount} kali (setengahnya = {average}).";
+    }
+}

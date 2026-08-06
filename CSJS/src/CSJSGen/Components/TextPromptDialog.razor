@@ -1,0 +1,83 @@
+@* A single-field prompt, used for project and file paths. *@
+@inject IJSRuntime Js
+@inject FolderPicker Picker
+
+<div class="overlay" @onclick="OnCancel">
+    <div class="dialog" style="width:min(460px, calc(100vw - 48px))" @onclick:stopPropagation>
+        <div class="dialog-head">
+            <span class="dialog-title">@Title</span>
+            <button class="icon-button" @onclick="OnCancel">✕</button>
+        </div>
+
+        <div class="dialog-body">
+            <div class="field" style="margin-bottom:0">
+                <label for="prompt-input">@Label</label>
+                @if (ShowBrowse)
+                {
+                    <div style="display:flex; gap:6px">
+                        <input id="prompt-input" type="text" @bind="_value" @bind:event="oninput"
+                               placeholder="@Placeholder" @onkeydown="OnKeyDown" style="flex:1" />
+                        <button class="button" type="button" @onclick="Browse"
+                                title="Pilih folder">Telusuri…</button>
+                    </div>
+                }
+                else
+                {
+                    <input id="prompt-input" type="text" @bind="_value" @bind:event="oninput"
+                           placeholder="@Placeholder" @onkeydown="OnKeyDown" />
+                }
+            </div>
+        </div>
+
+        <div class="dialog-foot">
+            <button class="button" @onclick="OnCancel">Batal</button>
+            <button class="button primary" @onclick="Confirm">Lanjut</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Title { get; set; } = "";
+    [Parameter] public string Label { get; set; } = "";
+    [Parameter] public string Value { get; set; } = "";
+    [Parameter] public string Placeholder { get; set; } = "";
+    [Parameter] public EventCallback<string> OnConfirm { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    /// <summary>Offers the system folder picker beside the box. Only meaningful for a folder.</summary>
+    [Parameter] public bool ShowBrowse { get; set; }
+
+    private string _value = "";
+
+    /// <summary>
+    /// Opens the system folder dialog, starting wherever the box currently points — or at its
+    /// nearest existing parent, so a half-typed path still lands somewhere useful.
+    /// </summary>
+    private async Task Browse()
+    {
+        var start = _value;
+        while (!string.IsNullOrWhiteSpace(start) && !Directory.Exists(start))
+            start = Path.GetDirectoryName(start) ?? "";
+
+        var chosen = await Picker.PickAsync(Title, start);
+        if (chosen is null) return;
+
+        _value = chosen;
+        StateHasChanged();
+    }
+
+    protected override void OnParametersSet() => _value = Value;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender) await Js.InvokeVoidAsync("csjsgen.focus", "#prompt-input");
+    }
+
+    private async Task Confirm() => await OnConfirm.InvokeAsync(_value);
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await Confirm();
+        else if (e.Key == "Escape") await OnCancel.InvokeAsync();
+    }
+}

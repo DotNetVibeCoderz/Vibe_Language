@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CSJS.Testing</RootNamespace>
+    <AssemblyName>CSJS.Testing</AssemblyName>
+    <PackageId>CSJS.Testing</PackageId>
+    <Description>Write unit tests in C#, run them on a JavaScript runtime. Part of the CSJS toolchain.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSJS.Core\CSJS.Core.csproj" />
+    <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
+  </ItemGroup>
+
+</Project>

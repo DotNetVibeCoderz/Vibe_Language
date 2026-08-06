@@ -1,0 +1,41 @@
+@* Attribution, which the spec requires to appear in the app itself. *@
+
+<div class="overlay" @onclick="OnClose">
+    <div class="dialog" style="width:min(420px, calc(100vw - 48px))" @onclick:stopPropagation>
+        <div class="dialog-head">
+            <span class="dialog-title">Tentang CSJSGen</span>
+            <button class="icon-button" @onclick="OnClose">✕</button>
+        </div>
+
+        <div class="dialog-body" style="text-align:center; padding:28px 24px">
+            <div class="brand-mark" style="font-size:30px; display:block; margin-bottom:6px">CSJSGen</div>
+            <p style="margin:0 0 20px; font-family:var(--mono); font-size:11px; color:var(--text-faint)">
+                versi @Version
+            </p>
+
+            <p style="margin:0 0 22px; font-size:13px; line-height:1.65; color:var(--text-muted)">
+                Generator kode CSJS bertenaga AI. Menulis C#, menghasilkan JavaScript modern.
+            </p>
+
+            <div style="padding-top:18px; border-top:1px solid var(--edge-soft)">
+                <p style="margin:0 0 4px; font-size:12.5px; color:var(--text)">
+                    Dibuat oleh <strong>Gravicode Studios</strong>
+                </p>
+                <p style="margin:0; font-size:12.5px; color:var(--text-muted)">
+                    dipimpin oleh <strong>Kang Fadhil</strong>
+                </p>
+            </div>
+        </div>
+
+        <div class="dialog-foot">
+            <button class="button primary" @onclick="OnClose">Tutup</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private static string Version =>
+        typeof(AboutDialog).Assembly.GetName().Version?.ToString(3) ?? "0.1.0";
+}

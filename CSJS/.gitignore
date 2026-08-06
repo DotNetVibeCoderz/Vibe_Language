@@ -1,0 +1,22 @@
+# Build output
+bin/
+obj/
+dist/
+artifacts/
+node_modules/
+
+# Transpiler output written beside the sources. `cs2js` regenerates all of it on build, and a
+# copy of the C# next to the emitted JavaScript is not something to publish.
+templates/**/wwwroot/js/*.csjs
+templates/**/wwwroot/js/*.js.map
+**/.csjs-stamp
+
+# Credentials. testkey.txt holds real API keys, and app.config holds them once configured.
+testkey.txt
+src/CSJSGen/app.config
+**/*.user
+
+# Editors
+.vs/
+.idea/
+*.swp

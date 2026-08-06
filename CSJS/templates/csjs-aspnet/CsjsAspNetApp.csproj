@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!--
+    The client-side C# lives under CsjsClient/ and is not compiled into this assembly.
+    It is transpiled to JavaScript instead, so the server build must not try to compile it.
+  -->
+  <ItemGroup>
+    <Compile Remove="CsjsClient/**" />
+    <Content Remove="CsjsClient/**" />
+    <None Include="CsjsClient/**" />
+  </ItemGroup>
+
+  <!--
+    Transpile before build so wwwroot/js is always current when the server starts.
+    Inputs and Outputs let MSBuild skip the step when nothing changed.
+  -->
+  <Target Name="TranspileCsjs" BeforeTargets="Build"
+          Inputs="@(None)" Outputs="$(MSBuildProjectDirectory)/wwwroot/js/.csjs-stamp">
+    <Message Importance="high" Text="CSJS: transpiling client C# to JavaScript..." />
+    <Exec Command="dotnet cs2js build &quot;$(MSBuildProjectDirectory)/CsjsClient&quot;"
+          ContinueOnError="false" />
+    <Touch Files="$(MSBuildProjectDirectory)/wwwroot/js/.csjs-stamp" AlwaysCreate="true" />
+  </Target>
+
+</Project>

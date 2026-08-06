@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <!--
+    CsjsClient/ holds the browser-side C#. It is transpiled, not compiled into this assembly,
+    so the server build must leave it alone.
+  -->
+  <ItemGroup>
+    <Compile Remove="CsjsClient/**" />
+    <Content Remove="CsjsClient/**" />
+    <None Include="CsjsClient/**" />
+  </ItemGroup>
+
+  <Target Name="TranspileCsjs" BeforeTargets="Build">
+    <Message Importance="high" Text="CSJS: transpiling client C# to JavaScript..." />
+    <Exec Command="dotnet cs2js build &quot;$(MSBuildProjectDirectory)/CsjsClient&quot;" ContinueOnError="false" />
+  </Target>
+
+</Project>

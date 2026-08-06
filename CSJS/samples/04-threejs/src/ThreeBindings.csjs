@@ -1,0 +1,142 @@
+using CSJS;
+using CSJS.Browser;
+
+namespace ThreeSample;
+
+// Bindings to the parts of three.js this sample uses.
+//
+// Each declaration is [JsImport]-marked, so the transpiler emits a real ES import and never a
+// class definition. Bodies throw because they exist only to satisfy the C# compiler — the
+// emitted JavaScript calls straight through to the library.
+//
+// This is the interop direction the spec calls for: C# calling JavaScript, with the C# type
+// system carrying the shape of the JS API.
+
+/// <summary>A 3D vector. Three.js exposes x/y/z, which [JsName] maps onto.</summary>
+[JsImport("three", "Vector3")]
+public class Vector3
+{
+    public Vector3() => throw new JsExternException();
+    public Vector3(double x, double y, double z) => throw new JsExternException();
+
+    [JsName("x")] public double X { get => throw new JsExternException(); set => throw new JsExternException(); }
+    [JsName("y")] public double Y { get => throw new JsExternException(); set => throw new JsExternException(); }
+    [JsName("z")] public double Z { get => throw new JsExternException(); set => throw new JsExternException(); }
+
+    public Vector3 Set(double x, double y, double z) => throw new JsExternException();
+}
+
+/// <summary>Euler rotation, in radians.</summary>
+[JsImport("three", "Euler")]
+public class Euler
+{
+    [JsName("x")] public double X { get => throw new JsExternException(); set => throw new JsExternException(); }
+    [JsName("y")] public double Y { get => throw new JsExternException(); set => throw new JsExternException(); }
+    [JsName("z")] public double Z { get => throw new JsExternException(); set => throw new JsExternException(); }
+}
+
+/// <summary>Base for anything that can sit in a scene graph.</summary>
+[JsImport("three", "Object3D")]
+public class Object3D
+{
+    [JsName("position")] public Vector3 Position => throw new JsExternException();
+    [JsName("rotation")] public Euler Rotation => throw new JsExternException();
+    [JsName("scale")] public Vector3 Scale => throw new JsExternException();
+
+    public void Add(Object3D child) => throw new JsExternException();
+    public void Remove(Object3D child) => throw new JsExternException();
+}
+
+/// <summary>The scene graph root.</summary>
+[JsImport("three", "Scene")]
+public class Scene : Object3D
+{
+    public Scene() => throw new JsExternException();
+}
+
+/// <summary>A perspective camera.</summary>
+[JsImport("three", "PerspectiveCamera")]
+public class PerspectiveCamera : Object3D
+{
+    public PerspectiveCamera(double fov, double aspect, double near, double far)
+        => throw new JsExternException();
+
+    [JsName("aspect")] public double Aspect { get => throw new JsExternException(); set => throw new JsExternException(); }
+
+    public void UpdateProjectionMatrix() => throw new JsExternException();
+}
+
+/// <summary>Options for the WebGL renderer.</summary>
+[JsObjectLiteral]
+public class RendererOptions
+{
+    [JsName("antialias")] public bool Antialias { get; set; }
+    [JsName("alpha")] public bool Alpha { get; set; }
+}
+
+/// <summary>The WebGL renderer.</summary>
+[JsImport("three", "WebGLRenderer")]
+public class WebGLRenderer
+{
+    public WebGLRenderer(RendererOptions options) => throw new JsExternException();
+
+    [JsName("domElement")] public Element DomElement => throw new JsExternException();
+
+    public void SetSize(double width, double height) => throw new JsExternException();
+    public void SetPixelRatio(double ratio) => throw new JsExternException();
+    public void SetClearColor(int color, double alpha) => throw new JsExternException();
+    public void Render(Scene scene, PerspectiveCamera camera) => throw new JsExternException();
+}
+
+/// <summary>Geometry for a box.</summary>
+[JsImport("three", "BoxGeometry")]
+public class BoxGeometry
+{
+    public BoxGeometry(double width, double height, double depth) => throw new JsExternException();
+}
+
+/// <summary>Geometry for a sphere.</summary>
+[JsImport("three", "IcosahedronGeometry")]
+public class IcosahedronGeometry
+{
+    public IcosahedronGeometry(double radius, int detail) => throw new JsExternException();
+}
+
+/// <summary>Options for the standard material.</summary>
+[JsObjectLiteral]
+public class MaterialOptions
+{
+    [JsName("color")] public int Color { get; set; }
+    [JsName("roughness")] public double Roughness { get; set; }
+    [JsName("metalness")] public double Metalness { get; set; }
+    [JsName("flatShading")] public bool FlatShading { get; set; }
+}
+
+/// <summary>A physically based material.</summary>
+[JsImport("three", "MeshStandardMaterial")]
+public class MeshStandardMaterial
+{
+    public MeshStandardMaterial(MaterialOptions options) => throw new JsExternException();
+}
+
+/// <summary>Geometry plus material, placed in the scene.</summary>
+[JsImport("three", "Mesh")]
+public class Mesh : Object3D
+{
+    public Mesh(BoxGeometry geometry, MeshStandardMaterial material) => throw new JsExternException();
+    public Mesh(IcosahedronGeometry geometry, MeshStandardMaterial material) => throw new JsExternException();
+}
+
+/// <summary>A light with no position, lifting everything out of pure black.</summary>
+[JsImport("three", "AmbientLight")]
+public class AmbientLight : Object3D
+{
+    public AmbientLight(int color, double intensity) => throw new JsExternException();
+}
+
+/// <summary>A positioned point light.</summary>
+[JsImport("three", "PointLight")]
+public class PointLight : Object3D
+{
+    public PointLight(int color, double intensity) => throw new JsExternException();
+}

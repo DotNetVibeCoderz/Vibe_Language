@@ -1,0 +1,110 @@
+{
+  "name": "csjs",
+  "displayName": "CSJS — C# for JavaScript",
+  "description": "Syntax highlighting, IntelliSense, build tasks, and a C#-to-JavaScript debugging bridge for .csjs files.",
+  "version": "0.1.0",
+  "publisher": "gravicode",
+  "license": "MIT",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Programming Languages", "Debuggers", "Snippets"],
+  "keywords": ["csjs", "csharp", "javascript", "transpiler"],
+  "activationEvents": ["onLanguage:csjs", "workspaceContains:**/csjs.json"],
+  "main": "./src/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "csjs",
+        "aliases": ["CSJS", "C# for JavaScript"],
+        "extensions": [".csjs"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "csjs",
+        "scopeName": "source.csjs",
+        "path": "./syntaxes/csjs.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      { "language": "csjs", "path": "./snippets/csjs.json" }
+    ],
+    "commands": [
+      { "command": "csjs.build", "title": "CSJS: Build project", "icon": "$(tools)" },
+      { "command": "csjs.run", "title": "CSJS: Run on Node", "icon": "$(play)" },
+      { "command": "csjs.serve", "title": "CSJS: Build and serve" },
+      { "command": "csjs.watch", "title": "CSJS: Watch and rebuild" },
+      { "command": "csjs.showOutput", "title": "CSJS: Show generated JavaScript" },
+      { "command": "csjs.newProject", "title": "CSJS: New project" }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "csjs.showOutput",
+          "when": "resourceExtname == .csjs",
+          "group": "navigation"
+        },
+        {
+          "command": "csjs.run",
+          "when": "resourceExtname == .csjs",
+          "group": "navigation"
+        }
+      ]
+    },
+    "taskDefinitions": [
+      {
+        "type": "csjs",
+        "required": ["command"],
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The cs2js command to run.",
+            "enum": ["build", "run", "watch", "serve"]
+          },
+          "project": {
+            "type": "string",
+            "description": "Project directory. Defaults to the workspace root."
+          }
+        }
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "csjs",
+        "owner": "csjs",
+        "fileLocation": ["relative", "${workspaceFolder}/src"],
+        "pattern": {
+          "regexp": "^\\s*(.*)\\((\\d+),(\\d+)\\):\\s+(error|warning)\\s+(\\S+):\\s+(.*)$",
+          "file": 1,
+          "line": 2,
+          "column": 3,
+          "severity": 4,
+          "code": 5,
+          "message": 6
+        }
+      }
+    ],
+    "breakpoints": [{ "language": "csjs" }],
+    "configuration": {
+      "title": "CSJS",
+      "properties": {
+        "csjs.cliPath": {
+          "type": "string",
+          "default": "cs2js",
+          "description": "Path to the cs2js executable. Use 'dotnet cs2js' if installed as a dotnet tool."
+        },
+        "csjs.buildOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Transpile the project whenever a .csjs file is saved."
+        },
+        "csjs.showOutputOnBuild": {
+          "type": "boolean",
+          "default": true,
+          "description": "Reveal the CSJS output channel when a build reports errors."
+        }
+      }
+    }
+  },
+  "repository": { "type": "git", "url": "https://github.com/gravicode/csjs" }
+}

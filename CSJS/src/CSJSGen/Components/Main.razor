@@ -1,0 +1,163 @@
+@* The application shell: title bar, the three editor columns, the chat panel, status bar. *@
+@implements IDisposable
+@inject AppState State
+@inject ProjectService Projects
+@inject ChatService Chat
+@inject PreviewServer Preview
+@inject IJSRuntime Js
+
+<div class="shell">
+
+    <TitleBar OnCompile="Compile" OnRun="RunCode" OnRunInBrowser="RunInBrowser" />
+
+    <div class="workspace" style="@WorkspaceColumns">
+        @if (State.ShowExplorer)
+        {
+            <ProjectExplorer />
+            <Splitter Width="State.ExplorerWidth"
+                      WidthChanged="w => State.ExplorerWidth = w"
+                      Label="Ubah lebar penjelajah" />
+        }
+
+        <EditorColumn @ref="_editor" />
+
+        @if (State.ShowProperties)
+        {
+            <Splitter Width="State.PropertiesWidth"
+                      WidthChanged="w => State.PropertiesWidth = w"
+                      GrowsLeft="true"
+                      Label="Ubah lebar properti" />
+            <PropertiesPanel />
+        }
+
+        @if (State.ShowChat)
+        {
+            <Splitter Width="State.ChatWidth"
+                      WidthChanged="w => State.ChatWidth = w"
+                      GrowsLeft="true"
+                      Label="Ubah lebar panel Jack" />
+            <ChatPanel />
+        }
+    </div>
+
+    <StatusBar />
+</div>
+
+@code {
+    private EditorColumn? _editor;
+
+    protected override void OnInitialized()
+    {
+        State.Changed += OnChanged;
+        Projects.Changed += OnChanged;
+        Chat.Changed += OnChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        await Js.InvokeVoidAsync("csjsgen.setTheme", State.Theme);
+
+        // A project named on the command line opens once the shell exists, so the panels are
+        // already listening when `Changed` fires.
+        try
+        {
+            if (Program.StartupProject is { } directory && Directory.Exists(directory))
+            {
+                Projects.OpenProject(directory);
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            State.OutputText = $"Gagal membuka proyek: {ex.Message}";
+            State.Notify();
+        }
+    }
+
+    /// <summary>
+    /// Column widths follow which panels are visible. Explicit tracks rather than flex keeps
+    /// the editor from jumping width when a side panel is toggled.
+    /// </summary>
+    private string WorkspaceColumns
+    {
+        get
+        {
+            // Widths come from state so the splitters can change them. The editor takes whatever
+            // is left, and `minmax(0, 1fr)` is what stops it from being pushed past the viewport.
+            var tracks = new List<string>();
+
+            if (State.ShowExplorer) { tracks.Add($"{State.ExplorerWidth:F0}px"); tracks.Add(SplitterTrack); }
+            tracks.Add("minmax(0, 1fr)");
+            if (State.ShowProperties) { tracks.Add(SplitterTrack); tracks.Add($"{State.PropertiesWidth:F0}px"); }
+            if (State.ShowChat) { tracks.Add(SplitterTrack); tracks.Add($"{State.ChatWidth:F0}px"); }
+
+            return $"grid-template-columns: {string.Join(' ', tracks)}";
+        }
+    }
+
+    /// <summary>Width of a splitter track. Narrow enough to read as a rule, wide enough to grab.</summary>
+    private const string SplitterTrack = "5px";
+
+    private async Task Compile()
+    {
+        if (_editor is not null) await _editor.CompileAsync();
+    }
+
+    private async Task RunCode()
+    {
+        if (_editor is not null) await _editor.RunAsync();
+    }
+
+    /// <summary>
+    /// Builds the project to disk and opens it in the system browser. This is the only way to see
+    /// a project that touches the DOM actually work — running it on Node reports
+    /// `document is not defined`, which is correct but not what the user wanted to find out.
+    /// </summary>
+    private async Task RunInBrowser()
+    {
+        if (Projects.Current is not { Directory.Length: > 0 } project)
+        {
+            State.OutputTab = "output";
+            State.OutputText = "Buka atau buat proyek dulu — pratinjau browser membangun dari folder proyek di disk.";
+            State.Notify();
+            return;
+        }
+
+        // The build reads the disk, so unsaved edits would preview the previous version.
+        Projects.SaveAll();
+
+        State.IsCompiling = true;
+        State.OutputTab = "output";
+        State.OutputText = "Membangun proyek…";
+        State.Notify();
+
+        var (report, url) = await Task.Run(() => Preview.BuildAndServe(project.Directory));
+
+        State.IsCompiling = false;
+
+        if (url is null)
+        {
+            State.OutputText = $"Build gagal — {report.ErrorCount} kesalahan. Tekan Compile untuk melihat rinciannya.";
+            State.Notify();
+            return;
+        }
+
+        PreviewServer.OpenBrowser(url);
+        State.OutputText =
+            $"Disajikan di {url}\n"
+            + $"{report.ModuleCount} modul, {report.Duration.TotalMilliseconds:F0} ms. Aset ikut disalin.\n\n"
+            + "Tekan Browser lagi setelah mengubah kode, lalu muat ulang halaman.";
+        State.Notify();
+    }
+
+    private void OnChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        State.Changed -= OnChanged;
+        Projects.Changed -= OnChanged;
+        Chat.Changed -= OnChanged;
+    }
+}

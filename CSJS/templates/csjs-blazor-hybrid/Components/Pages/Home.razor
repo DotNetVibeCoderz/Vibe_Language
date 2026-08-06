@@ -1,0 +1,124 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IJSRuntime Js
+@implements IAsyncDisposable
+
+<PageTitle>CSJS Blazor Hybrid</PageTitle>
+
+<div class="cards">
+    @foreach (var series in _series)
+    {
+        <article class="card">
+            <div class="card-head">
+                <h2>@series.Label</h2>
+                <span class="trend @(series.Rising ? "up" : "down")">
+                    @(series.Rising ? "▲" : "▼") @series.Last.ToString("F1")
+                </span>
+            </div>
+
+            @* The SVG is empty until the transpiled C# fills it in. *@
+            <svg id="@series.ElementId" class="spark" role="img" aria-label="Grafik @series.Label"></svg>
+
+            <dl class="stats">
+                <div><dt>Min</dt><dd>@series.Min.ToString("F1")</dd></div>
+                <div><dt>Rata-rata</dt><dd>@series.Average.ToString("F1")</dd></div>
+                <div><dt>Maks</dt><dd>@series.Max.ToString("F1")</dd></div>
+            </dl>
+        </article>
+    }
+</div>
+
+<button class="refresh" @onclick="Refresh">Data baru</button>
+
+@code {
+    private IJSObjectReference? _module;
+    private readonly List<SeriesView> _series = new();
+    private readonly Random _random = new();
+
+    protected override void OnInitialized() => Generate();
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            // The transpiled module is imported like any other ES module.
+            _module = await Js.InvokeAsync<IJSObjectReference>("import", "./js/Sparkline.js");
+        }
+
+        await Draw();
+    }
+
+    private async Task Refresh()
+    {
+        Generate();
+        StateHasChanged();
+        await Draw();
+    }
+
+    /// <summary>
+    /// Hands each series to the transpiled C#. The statistics come back from the same module,
+    /// so the numbers under the chart and the chart itself cannot disagree.
+    /// </summary>
+    private async Task Draw()
+    {
+        if (_module is null) return;
+
+        foreach (var series in _series)
+        {
+            await _module.InvokeVoidAsync("Sparkline.Render", series.ElementId, series.Values, series.Colour);
+        }
+    }
+
+    private void Generate()
+    {
+        _series.Clear();
+
+        var definitions = new (string Label, string Colour)[]
+        {
+            ("Kunjungan", "#c2410c"),
+            ("Konversi", "#0369a1"),
+            ("Pendapatan", "#15803d"),
+        };
+
+        for (var i = 0; i < definitions.Length; i++)
+        {
+            var values = new double[24];
+            var level = _random.Next(40, 70);
+
+            for (var t = 0; t < values.Length; t++)
+            {
+                // A bounded random walk reads like real telemetry rather than noise.
+                level += _random.Next(-6, 8);
+                level = Math.Clamp(level, 5, 100);
+                values[t] = level;
+            }
+
+            _series.Add(new SeriesView
+            {
+                ElementId = $"spark-{i}",
+                Label = definitions[i].Label,
+                Colour = definitions[i].Colour,
+                Values = values,
+            });
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null) await _module.DisposeAsync();
+    }
+
+    private sealed class SeriesView
+    {
+        public string ElementId { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string Colour { get; set; } = "";
+        public double[] Values { get; set; } = Array.Empty<double>();
+
+        public double Min => Values.Length == 0 ? 0 : Values.Min();
+        public double Max => Values.Length == 0 ? 0 : Values.Max();
+        public double Average => Values.Length == 0 ? 0 : Values.Average();
+        public double Last => Values.Length == 0 ? 0 : Values[^1];
+        public bool Rising => Last >= Average;
+    }
+}

@@ -1,0 +1,414 @@
+@* Menu bar and primary actions. Project and file lifecycle both live here, per the spec. *@
+@inject AppState State
+@inject ProjectService Projects
+@inject NodeRunner Runner
+@inject PreviewServer Preview
+@inject IJSRuntime Js
+
+<header class="titlebar">
+    <div class="brand">
+        <span class="brand-mark">CSJSGen</span>
+        <span class="brand-sub">C# → JS</span>
+    </div>
+
+    <nav class="menu">
+        <div class="menu-item">
+            <button class="menu-button" aria-expanded="@(_openMenu == "file")" @onclick='() => Toggle("file")'>
+                Berkas
+            </button>
+            @if (_openMenu == "file")
+            {
+                <div class="dropdown">
+                    <button @onclick="NewProject">Proyek baru<kbd>Ctrl+Shift+N</kbd></button>
+                    <button @onclick="OpenProject">Buka proyek…<kbd>Ctrl+Shift+O</kbd></button>
+                    <button @onclick="CloseProject" disabled="@(Projects.Current is null)">Tutup proyek</button>
+                    <hr />
+                    <button @onclick="NewFile" disabled="@(Projects.Current is null)">Berkas baru<kbd>Ctrl+N</kbd></button>
+                    <button @onclick="OpenFile">Buka berkas…<kbd>Ctrl+O</kbd></button>
+                    <hr />
+                    <button @onclick="Save" disabled="@(Projects.ActiveFile is null)">Simpan<kbd>Ctrl+S</kbd></button>
+                    <button @onclick="SaveAs" disabled="@(Projects.ActiveFile is null)">Simpan sebagai…</button>
+                    <button @onclick="SaveAll" disabled="@(Projects.Current is null)">Simpan semua<kbd>Ctrl+Shift+S</kbd></button>
+                    <hr />
+                    <button @onclick="Quit">Keluar</button>
+                </div>
+            }
+        </div>
+
+        <div class="menu-item">
+            <button class="menu-button" aria-expanded="@(_openMenu == "edit")" @onclick='() => Toggle("edit")'>
+                Ubah
+            </button>
+            @if (_openMenu == "edit")
+            {
+                <div class="dropdown">
+                    <button @onclick='() => Command("cut")'>Potong<kbd>Ctrl+X</kbd></button>
+                    <button @onclick='() => Command("copy")'>Salin<kbd>Ctrl+C</kbd></button>
+                    <button @onclick='() => Command("paste")'>Tempel<kbd>Ctrl+V</kbd></button>
+                    <hr />
+                    <button @onclick='() => Command("goto")'>Ke baris…<kbd>Ctrl+G</kbd></button>
+                    <button @onclick='() => Command("find")'>Cari<kbd>Ctrl+F</kbd></button>
+                    <button @onclick='() => Command("replace")'>Ganti<kbd>Ctrl+H</kbd></button>
+                    <hr />
+                    <button @onclick='() => Command("format")'>Rapikan kode<kbd>Ctrl+Alt+F</kbd></button>
+                </div>
+            }
+        </div>
+
+        <div class="menu-item">
+            <button class="menu-button" aria-expanded="@(_openMenu == "view")" @onclick='() => Toggle("view")'>
+                Tampilan
+            </button>
+            @if (_openMenu == "view")
+            {
+                <div class="dropdown">
+                    <button @onclick="() => TogglePanel(Panel.Explorer)">
+                        Penjelajah proyek @(State.ShowExplorer ? "✓" : "")
+                    </button>
+                    <button @onclick="() => TogglePanel(Panel.Properties)">
+                        Properti @(State.ShowProperties ? "✓" : "")
+                    </button>
+                    <button @onclick="() => TogglePanel(Panel.Chat)">
+                        Jack The Code Bender @(State.ShowChat ? "✓" : "")
+                    </button>
+                    <hr />
+                    <button @onclick="ToggleLineNumbers">
+                        Nomor baris @(State.ShowLineNumbers ? "✓" : "")
+                    </button>
+                    <hr />
+                    <button @onclick="ToggleTheme">
+                        Tema @(State.Theme == "dark" ? "terang" : "gelap")
+                    </button>
+                </div>
+            }
+        </div>
+
+        <div class="menu-item">
+            <button class="menu-button" aria-expanded="@(_openMenu == "help")" @onclick='() => Toggle("help")'>
+                Bantuan
+            </button>
+            @if (_openMenu == "help")
+            {
+                <div class="dropdown">
+                    <button @onclick="() => _showAbout = true">Tentang CSJSGen</button>
+                </div>
+            }
+        </div>
+    </nav>
+
+    <div class="spacer"></div>
+
+    <button class="tool-button @(State.ShowExplorer ? "active" : "")"
+            title="Penjelajah proyek" @onclick="() => TogglePanel(Panel.Explorer)">◧</button>
+    <button class="tool-button @(State.ShowProperties ? "active" : "")"
+            title="Properti" @onclick="() => TogglePanel(Panel.Properties)">◨</button>
+    <button class="tool-button @(State.ShowChat ? "active" : "")"
+            title="Jack The Code Bender" @onclick="() => TogglePanel(Panel.Chat)">✦</button>
+
+    <button class="tool-button" title="Ganti tema" @onclick="ToggleTheme">
+        @(State.Theme == "dark" ? "☾" : "☀")
+    </button>
+
+    <button class="run-button" @onclick="OnCompile" disabled="@State.IsCompiling" title="Compile (F6)">
+        @(State.IsCompiling ? "…" : "⟳") Compile
+    </button>
+
+    <button class="run-button" @onclick="OnRun" disabled="@State.IsCompiling"
+            title="Jalankan di Node (F5)" style="margin-left:4px">▷ Jalankan</button>
+
+    @* Node has no DOM, so anything that touches the page needs a real browser to be seen. *@
+    <button class="run-button primary" @onclick="OnRunInBrowser" disabled="@State.IsCompiling"
+            title="Jalankan di browser (Shift+F5)" style="margin-left:4px">◈ Browser</button>
+
+    @* Only while something is actually running. A permanently dead Stop button is noise, and a
+       background service or a chat server has no other way to end. *@
+    @if (Runner.IsRunning || Preview.Address is not null)
+    {
+        <button class="run-button stop" @onclick="Stop"
+                title="Hentikan yang sedang berjalan (Shift+F6)" style="margin-left:4px">■ Hentikan</button>
+    }
+</header>
+
+@if (_openMenu is not null)
+{
+    @* Clicking anywhere else closes the menu, which a dropdown needs to feel native. *@
+    <div style="position:fixed;inset:0;z-index:50" @onclick="() => _openMenu = null"></div>
+}
+
+@if (_showAbout)
+{
+    <AboutDialog OnClose="() => _showAbout = false" />
+}
+
+@if (_showNewProject)
+{
+    <NewProjectDialog OnCreate="CreateProject" OnCancel="() => _showNewProject = false" />
+}
+
+@if (_dialog is not null)
+{
+    <TextPromptDialog Title="@_dialog.Title"
+                      Label="@_dialog.Label"
+                      Value="@_dialog.Value"
+                      Placeholder="@_dialog.Placeholder"
+                      OnConfirm="_dialog.OnConfirm"
+                      ShowBrowse="_dialog.ShowBrowse"
+                      OnCancel="() => _dialog = null" />
+}
+
+@implements IDisposable
+
+@code {
+    [Parameter] public EventCallback OnCompile { get; set; }
+    [Parameter] public EventCallback OnRun { get; set; }
+    [Parameter] public EventCallback OnRunInBrowser { get; set; }
+
+    // The menu prints accelerators, so they have to work wherever focus is.
+    private DotNetObjectReference<TitleBar>? _self;
+
+    protected override void OnInitialized()
+    {
+        // The Stop button's visibility is derived state, and a parent render does not reach a
+        // child whose parameters have not changed — so this listens for itself, as every other
+        // panel here does.
+        State.Changed += OnStateChanged;
+        Projects.Changed += OnStateChanged;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _self = DotNetObjectReference.Create(this);
+        await Js.InvokeVoidAsync("csjsgen.bindShortcuts", _self);
+    }
+
+    /// <summary>
+    /// Runs a menu accelerator. This has to be an instance method: the JavaScript side holds a
+    /// <c>DotNetObjectReference</c>, and <c>invokeMethodAsync</c> on one only reaches instance
+    /// members — a static <c>[JSInvokable]</c> would need the assembly-qualified call instead,
+    /// and fails silently otherwise.
+    /// </summary>
+    [JSInvokable]
+    public Task OnShortcut(string command) => InvokeAsync(() =>
+    {
+        switch (command)
+        {
+            case "new-project": NewProject(); break;
+            case "open-project": OpenProject(); break;
+            case "new-file": NewFile(); break;
+            case "open-file": OpenFile(); break;
+            case "save-all": SaveAll(); break;
+            case "compile": _ = OnCompile.InvokeAsync(); break;
+            case "run": _ = OnRun.InvokeAsync(); break;
+            case "run-browser": _ = OnRunInBrowser.InvokeAsync(); break;
+            case "stop": Stop(); break;
+        }
+
+        StateHasChanged();
+    });
+
+    public void Dispose()
+    {
+        State.Changed -= OnStateChanged;
+        Projects.Changed -= OnStateChanged;
+        _self?.Dispose();
+    }
+
+    private string? _openMenu;
+    private bool _showAbout;
+    private bool _showNewProject;
+    private PromptRequest? _dialog;
+
+    private enum Panel { Explorer, Properties, Chat }
+
+    private sealed record PromptRequest(
+        string Title, string Label, string Value, string Placeholder, EventCallback<string> OnConfirm,
+        bool ShowBrowse = false);
+
+    /// <summary>
+    /// Ends whatever this session started: the Node process and the preview server. Both, because
+    /// the user pressing Stop means "stop", not "stop one of the two things I cannot see".
+    /// </summary>
+    private void Stop()
+    {
+        _openMenu = null;
+
+        var stopped = new List<string>();
+        if (Runner.IsRunning) { Runner.Stop(); stopped.Add("proses Node"); }
+        if (Preview.Address is not null) { Preview.Stop(); stopped.Add("peladen pratinjau"); }
+
+        State.OutputText = stopped.Count > 0
+            ? "Dihentikan: " + string.Join(" dan ", stopped) + "."
+            : "Tidak ada yang berjalan.";
+        State.Notify();
+    }
+
+    private void Toggle(string menu) => _openMenu = _openMenu == menu ? null : menu;
+
+    private void TogglePanel(Panel panel)
+    {
+        _openMenu = null;
+        switch (panel)
+        {
+            case Panel.Explorer: State.ShowExplorer = !State.ShowExplorer; break;
+            case Panel.Properties: State.ShowProperties = !State.ShowProperties; break;
+            case Panel.Chat: State.ShowChat = !State.ShowChat; break;
+        }
+    }
+
+    private void ToggleLineNumbers()
+    {
+        _openMenu = null;
+        State.ShowLineNumbers = !State.ShowLineNumbers;
+    }
+
+    private async Task ToggleTheme()
+    {
+        _openMenu = null;
+        State.ToggleTheme();
+        await Js.InvokeVoidAsync("csjsgen.setTheme", State.Theme);
+    }
+
+    // ---- Project lifecycle ---------------------------------------------------------------
+
+    private void NewProject()
+    {
+        _openMenu = null;
+        _showNewProject = true;
+    }
+
+    private void CreateProject((string Name, string Location, string TemplateId) request)
+    {
+        _showNewProject = false;
+
+        var directory = Path.Combine(request.Location, request.Name);
+        var template = ProjectTemplates.Find(request.TemplateId);
+
+        Projects.NewProject(directory, request.Name, request.TemplateId);
+
+        State.OutputText = $"Proyek '{request.Name}' dibuat dari template " +
+                           $"'{template?.Name ?? request.TemplateId}' di {directory}";
+        State.Notify();
+    }
+
+    private void OpenProject()
+    {
+        _openMenu = null;
+        _dialog = new PromptRequest(
+            "Buka proyek",
+            "Lokasi folder",
+            Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments), "CSJSGen"),
+            @"C:\path\ke\proyek",
+            EventCallback.Factory.Create<string>(this, path =>
+            {
+                _dialog = null;
+                if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+                {
+                    State.OutputText = $"Folder tidak ditemukan: {path}";
+                    State.Notify();
+                    return;
+                }
+
+                Projects.OpenProject(path.Trim());
+            }),
+            ShowBrowse: true);
+    }
+
+    private void CloseProject()
+    {
+        _openMenu = null;
+        Projects.CloseProject();
+    }
+
+    private void NewFile()
+    {
+        _openMenu = null;
+        _dialog = new PromptRequest(
+            "Berkas baru",
+            "Nama berkas",
+            "Baru.csjs",
+            "Contoh: Widget.csjs",
+            EventCallback.Factory.Create<string>(this, name =>
+            {
+                _dialog = null;
+                if (string.IsNullOrWhiteSpace(name)) return;
+
+                var fileName = name.Trim();
+                if (!fileName.Contains('.')) fileName += ".csjs";
+                Projects.NewFile(fileName);
+            }));
+    }
+
+    private void OpenFile()
+    {
+        _openMenu = null;
+        _dialog = new PromptRequest(
+            "Buka berkas",
+            "Lokasi berkas",
+            "",
+            @"C:\path\ke\Program.csjs",
+            EventCallback.Factory.Create<string>(this, path =>
+            {
+                _dialog = null;
+                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
+                {
+                    State.OutputText = $"Berkas tidak ditemukan: {path}";
+                    State.Notify();
+                    return;
+                }
+
+                Projects.OpenFile(path.Trim());
+            }));
+    }
+
+    private void Save()
+    {
+        _openMenu = null;
+        Projects.SaveActive();
+    }
+
+    private void SaveAs()
+    {
+        _openMenu = null;
+        var current = Projects.ActiveFile;
+        if (current is null) return;
+
+        _dialog = new PromptRequest(
+            "Simpan sebagai",
+            "Lokasi tujuan",
+            current.Path,
+            @"C:\path\ke\Berkas.csjs",
+            EventCallback.Factory.Create<string>(this, path =>
+            {
+                _dialog = null;
+                if (string.IsNullOrWhiteSpace(path)) return;
+                Projects.SaveActiveAs(path.Trim());
+            }));
+    }
+
+    private void SaveAll()
+    {
+        _openMenu = null;
+        Projects.SaveAll();
+    }
+
+    private void Quit()
+    {
+        _openMenu = null;
+        System.Environment.Exit(0);
+    }
+
+    // ---- Edit commands -------------------------------------------------------------------
+
+    /// <summary>
+    /// Edit-menu items are handled by the editor. Routing through AppState keeps this menu from
+    /// needing a reference to the editor component.
+    /// </summary>
+    private void Command(string name)
+    {
+        _openMenu = null;
+        EditorCommands.Raise(name);
+    }
+}

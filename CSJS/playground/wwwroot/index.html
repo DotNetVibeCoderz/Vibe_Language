@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="id">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>CSJS Playground — transpile C# ke JavaScript di browser</title>
+    <meta name="description"
+          content="Coba transpiler CSJS langsung di browser. Tulis C#, lihat JavaScript modern dan deklarasi TypeScript-nya." />
+    <base href="/" />
+    <link rel="stylesheet" href="css/app.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+</head>
+
+<body>
+    <div id="app">
+        <!--
+          The transpiler is Roslyn running in WebAssembly, so first load takes a moment.
+          Saying so beats an unexplained blank page.
+        -->
+        <div class="boot">
+            <div class="boot-mark">CSJS</div>
+            <div class="boot-note">Memuat transpiler…</div>
+            <div class="boot-bar"></div>
+        </div>
+    </div>
+
+    <div id="blazor-error-ui" style="display:none">
+        Terjadi kesalahan. <a href="." class="reload">Muat ulang</a>
+    </div>
+
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+</html>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSJS Console</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0d0c0a;
+        --panel: #16150f;
+        --fg: #e8e4dc;
+        --muted: #8a857b;
+        --accent: #fb923c;
+        --border: rgb(255 255 255 / 0.1);
+      }
+
+      * { box-sizing: border-box; }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        padding: 2rem 1.5rem;
+        background: var(--bg);
+        color: var(--fg);
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+        display: grid;
+        place-items: start center;
+      }
+
+      .shell { width: min(52rem, 100%); }
+
+      header { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+
+      .eyebrow {
+        font-size: 0.75rem;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: var(--accent);
+        font-weight: 600;
+        margin: 0 0 0.3rem;
+      }
+
+      h1 { margin: 0; font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; }
+
+      button {
+        font: inherit;
+        font-weight: 600;
+        padding: 0.5rem 1.1rem;
+        border: 1px solid var(--border);
+        border-radius: 0.5rem;
+        background: rgb(255 255 255 / 0.06);
+        color: var(--fg);
+        cursor: pointer;
+        transition: background 150ms ease;
+      }
+
+      button:hover { background: rgb(255 255 255 / 0.12); }
+
+      #terminal {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 0.75rem;
+        padding: 1.25rem 1.4rem;
+        min-height: 24rem;
+        max-height: 70vh;
+        overflow-y: auto;
+        font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
+        font-size: 0.875rem;
+        line-height: 1.65;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+
+      .line-err { color: #f87171; }
+
+      footer { margin-top: 1.25rem; font-size: 0.8125rem; color: var(--muted); }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <header>
+        <div>
+          <p class="eyebrow">CSJS Template</p>
+          <h1>Console to Web</h1>
+        </div>
+        <button id="rerun">Jalankan ulang</button>
+      </header>
+
+      <div id="terminal"></div>
+
+      <footer>Gravicode Studios — dipimpin oleh Kang Fadhil</footer>
+    </div>
+
+    <script type="module">
+      import { Program } from './Program.js';
+
+      const terminal = document.getElementById('terminal');
+
+      // Console output is redirected into the page, so the C# program needs no browser
+      // knowledge of its own — Console.WriteLine keeps working unchanged.
+      const nativeLog = console.log;
+      const nativeError = console.error;
+
+      function append(text, className) {
+        const line = document.createElement('div');
+        if (className) line.className = className;
+        line.textContent = text;
+        terminal.appendChild(line);
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+
+      console.log = (...args) => {
+        append(args.map(String).join(' '));
+        nativeLog(...args);
+      };
+
+      console.error = (...args) => {
+        append(args.map(String).join(' '), 'line-err');
+        nativeError(...args);
+      };
+
+      function run() {
+        terminal.textContent = '';
+        try {
+          Program.Main();
+        } catch (error) {
+          console.error(`Unhandled: ${error.message}`);
+        }
+      }
+
+      document.getElementById('rerun').addEventListener('click', run);
+      run();
+    </script>
+  </body>
+</html>

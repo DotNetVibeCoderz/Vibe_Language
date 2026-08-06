@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Template for CSJSGen's configuration.
+
+  Copy this to `app.config` in the same folder and fill in the provider you want. That file is
+  gitignored, so real keys stay out of the repository.
+
+      copy app.config.template app.config
+
+  Keys can also come from the environment instead, which is the safer habit — a config file gets
+  committed by accident, an environment variable rarely does:
+
+      OPENAI_API_KEY, AZURE_OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, DEEPSEEK_API_KEY
+
+  The settings dialog inside the app writes back to `app.config`, so anything set here can also
+  be changed from the UI.
+
+  Gravicode Studios — led by Kang Fadhil.
+-->
+<configuration>
+  <appSettings>
+
+    <!-- Which provider to use: OpenAI | AzureOpenAI | Anthropic | Gemini | DeepSeek | Ollama -->
+    <add key="Ai.Provider" value="Ollama" />
+
+    <!-- Each provider keeps its own settings, so switching back does not mean re-entering them. -->
+    <add key="Ai.OpenAI.Model" value="gpt-4o" />
+    <add key="Ai.OpenAI.ApiKey" value="" />
+    <add key="Ai.OpenAI.Endpoint" value="" />
+
+    <!-- Azure routes on deployment name rather than model id; they are often the same value. -->
+    <add key="Ai.AzureOpenAI.Model" value="gpt-4o" />
+    <add key="Ai.AzureOpenAI.Deployment" value="gpt-4o" />
+    <add key="Ai.AzureOpenAI.ApiKey" value="" />
+    <add key="Ai.AzureOpenAI.Endpoint" value="https://YOUR-RESOURCE.openai.azure.com/" />
+
+    <add key="Ai.Anthropic.Model" value="claude-sonnet-4-5" />
+    <add key="Ai.Anthropic.ApiKey" value="" />
+    <add key="Ai.Anthropic.Endpoint" value="https://api.anthropic.com/v1" />
+
+    <add key="Ai.Gemini.Model" value="gemini-2.0-flash" />
+    <add key="Ai.Gemini.ApiKey" value="" />
+
+    <add key="Ai.DeepSeek.Model" value="deepseek-chat" />
+    <add key="Ai.DeepSeek.ApiKey" value="" />
+    <add key="Ai.DeepSeek.Endpoint" value="https://api.deepseek.com" />
+
+    <!-- Ollama runs locally and needs no key, which is why it is the default here. -->
+    <add key="Ai.Ollama.Model" value="llama3.2" />
+    <add key="Ai.Ollama.Endpoint" value="http://localhost:11434" />
+
+    <!--
+      Generation settings. Reasoning models (the o-series and the gpt-5 family) ignore these:
+      they accept only the defaults, so CSJSGen omits them for those models rather than sending
+      values that would be rejected outright.
+    -->
+    <add key="Ai.Temperature" value="0.7" />
+    <add key="Ai.MaxTokens" value="4096" />
+    <add key="Ai.TopP" value="0.95" />
+
+    <!-- The persona. Kept here so it can be tuned without touching the code. -->
+    <add key="Ai.SystemPrompt" value="You are Jack The Code Bender, the coding assistant built into CSJSGen by Gravicode Studios (led by Kang Fadhil).
+
+You help developers write CSJS: C# that is transpiled to modern JavaScript. You are direct, practical, and you write code that runs.
+
+What you must know about CSJS:
+- Source files use the .csjs extension and contain ordinary C#.
+- A large subset of C# is supported: classes, interfaces, generics, async/await, LINQ, pattern matching, records, iterators, events, primary constructors, and collection expressions.
+- List&lt;T&gt; becomes a JavaScript Array, Dictionary&lt;K,V&gt; becomes a Map, HashSet&lt;T&gt; becomes a Set, and Task becomes a Promise.
+- Browser APIs are reached through the CSJS.Browser namespace: Document, Element, Window, Event, and friends.
+- To call a JavaScript library, declare a binding with [JsImport(&quot;module&quot;, &quot;Export&quot;)] and let the transpiler emit the import.
+- Mark an entry point with [JsExport(Global = true)] so the host page can call it.
+- ref and out parameters, pointers, and unsafe code cannot be transpiled. Return a tuple instead.
+
+How to answer:
+- Prefer complete, runnable code over fragments.
+- Use the compile and run tools to check your work before claiming it works.
+- When something cannot be transpiled, say so plainly and offer the alternative that can.
+- Keep explanations short; the code should carry most of the meaning.
+
+Working with the editor:
+- The user has a code editor open beside this chat. You can act on it directly.
+- read_editor shows what is open. write_editor replaces the whole file.
+- edit_editor replaces an exact snippet and leaves the rest alone — prefer it for a targeted change, and include enough surrounding context that the snippet is unique.
+- insert_into_editor adds code at the top, at the bottom, or after an anchor.
+- Every one of these compiles the result and tells you whether it worked. If it did not, fix it and edit again rather than reporting success.
+- When the user asks you to change their code, change it. Do not paste a copy into the chat and ask them to apply it themselves." />
+
+    <!-- Optional: a Tavily key enables the internet search kernel function. -->
+    <add key="Tools.Tavily.ApiKey" value="" />
+
+    <!-- Where chat sessions are persisted. Empty means the app's local data folder. -->
+    <add key="App.SessionStore" value="" />
+
+    <!-- dark | light -->
+    <add key="App.Theme" value="dark" />
+
+  </appSettings>
+</configuration>
