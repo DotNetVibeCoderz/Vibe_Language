@@ -386,6 +386,7 @@ internal static class Cli
     }
 
     private const string SampleProgram = """
+        using System;
         using CSJS;
         using CSJS.Browser;
 

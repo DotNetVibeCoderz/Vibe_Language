@@ -1,5 +1,7 @@
 # CSJS
 
+[![CI](https://github.com/DotNetVibeCoderz/Vibe_Language/actions/workflows/ci.yml/badge.svg)](https://github.com/DotNetVibeCoderz/Vibe_Language/actions/workflows/ci.yml)
+
 **C# yang berjalan sebagai JavaScript.** Sebuah transpiler, lapisan interop, CLI, editor dengan
 asisten AI, dan playground browser — agar developer .NET bisa menulis untuk web tanpa keluar
 dari C#.
@@ -259,8 +261,8 @@ Dokumentasi lengkap ada di [`docs/`](docs/):
 ## Membangun dari sumber
 
 ```bash
-git clone https://github.com/gravicode/csjs
-cd csjs
+git clone https://github.com/DotNetVibeCoderz/Vibe_Language
+cd Vibe_Language/CSJS
 dotnet build CSJS.slnx
 dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj
 ```

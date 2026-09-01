@@ -19,7 +19,6 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>cs2js</ToolCommandName>
     <PackageId>CSJS.Cli.Standalone</PackageId>
-    <PackageOutputPath>../../artifacts/nupkg</PackageOutputPath>
     <Description>The CSJS transpiler CLI under the short `cs2js` command. Install CSJS.Cli instead if you prefer `dotnet cs2js`.</Description>
   </PropertyGroup>
 

@@ -15,7 +15,6 @@
     -->
     <ToolCommandName>dotnet-cs2js</ToolCommandName>
     <PackageId>CSJS.Cli</PackageId>
-    <PackageOutputPath>../../artifacts/nupkg</PackageOutputPath>
     <Description>Command line transpiler for CSJS: compiles C# to modern JavaScript. Run `dotnet cs2js build`.</Description>
   </PropertyGroup>
 

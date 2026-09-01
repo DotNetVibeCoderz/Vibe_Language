@@ -1,0 +1,261 @@
+# CSJS — build, test, pack, publish.
+#
+# This lives at the root of Vibe_Language, which holds several projects; GitHub reads workflows
+# only from `.github/workflows/` at a repository root, so it cannot sit inside `CSJS/`. The
+# "Locate CSJS" step finds the solution at the root or under `CSJS/`, so the same file also
+# works if CSJS is ever split out on its own.
+
+name: CSJS CI
+
+on:
+  push:
+    # Deliberately unfiltered by path. A `paths` filter here would also apply to tag pushes,
+    # and a release tag that GitHub decided did not touch CSJS/ would skip publishing without
+    # saying so. Pull requests carry the filter instead, which is where the volume is.
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+    branches: [main, master]
+    paths:
+      - "CSJS/**"
+      - ".github/workflows/csjs-ci.yml"
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  # ---------------------------------------------------------------------------------------
+  # The gate that matters. The semantics tests transpile C#, run the emitted JavaScript on
+  # Node, and compare against what C# itself prints — so Node is a build dependency here, not
+  # a convenience.
+  # ---------------------------------------------------------------------------------------
+  test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate CSJS
+        id: locate
+        run: |
+          if [ -f CSJS.slnx ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f CSJS/CSJS.slnx ]; then
+            echo "dir=CSJS" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::CSJS.slnx not found at the root or under CSJS/"
+            exit 1
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Restore
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: dotnet restore tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj
+
+      # CSJSGen targets net10.0-windows, so the solution as a whole cannot build here. The test
+      # project references Core, Interop, and Testing, which is the whole engine.
+      - name: Build
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: dotnet build tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj -c Release --no-restore
+
+      - name: Test
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: >
+          dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj
+          -c Release --no-build
+          --logger "trx;LogFileName=results.trx"
+          --results-directory TestResults
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: ${{ steps.locate.outputs.dir }}/TestResults/*.trx
+          if-no-files-found: warn
+
+  # ---------------------------------------------------------------------------------------
+  # The desktop editor and the WebAssembly playground build only on Windows, so they get their
+  # own job rather than being dropped from CI.
+  # ---------------------------------------------------------------------------------------
+  windows:
+    name: Full solution (Windows)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate CSJS
+        id: locate
+        shell: bash
+        run: |
+          if [ -f CSJS.slnx ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f CSJS/CSJS.slnx ]; then
+            echo "dir=CSJS" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::CSJS.slnx not found"
+            exit 1
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # The playground is a Blazor WebAssembly project and declares its own workload.
+      - name: Restore workloads
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: dotnet workload restore CSJS.slnx
+
+      - name: Build the solution
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: dotnet build CSJS.slnx -c Release
+
+  # ---------------------------------------------------------------------------------------
+  # Packing is separate from publishing: every commit produces packages you can download and
+  # inspect, and only a tag pushes them anywhere.
+  # ---------------------------------------------------------------------------------------
+  pack:
+    name: Pack
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The repository commit recorded in the nuspec needs real history.
+          fetch-depth: 0
+
+      - name: Locate CSJS
+        id: locate
+        run: |
+          if [ -f CSJS.slnx ]; then
+            echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f CSJS/CSJS.slnx ]; then
+            echo "dir=CSJS" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::CSJS.slnx not found"
+            exit 1
+          fi
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      # A tag names the version. Anything else gets a prerelease suffix, so a CI build can
+      # never be mistaken for a release.
+      - name: Resolve version
+        id: version
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "args=-p:Version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            echo "args=--version-suffix ci.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Pack
+        working-directory: ${{ steps.locate.outputs.dir }}
+        run: |
+          for p in src/CSJS.Core src/CSJS.Interop src/CSJS.Testing src/CSJS.Cli src/CSJS.Cli.Standalone; do
+            dotnet pack "$p" -c Release ${{ steps.version.outputs.args }}
+          done
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: nupkg
+          path: ${{ steps.locate.outputs.dir }}/artifacts/nupkg/*.*nupkg
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------------------
+  # Does the packed tool actually work? The unit tests cover the engine; this covers the
+  # packaging — install the tool, scaffold a project, build it, run it on Node.
+  # ---------------------------------------------------------------------------------------
+  smoke:
+    name: Smoke test the packed CLI
+    runs-on: ubuntu-latest
+    needs: pack
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: nupkg
+
+      - name: Install the tool
+        run: |
+          pkg=$(ls nupkg/CSJS.Cli.Standalone.*.nupkg | head -1)
+          version=$(basename "$pkg" .nupkg | sed "s/^CSJS.Cli.Standalone.//")
+          echo "Installing cs2js $version"
+          dotnet tool install --global --add-source ./nupkg --version "$version" CSJS.Cli.Standalone
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+
+      - name: Scaffold, build, run
+        run: |
+          cs2js new SmokeTest
+          cd SmokeTest
+          cs2js build .
+
+          for f in dist/Program.js dist/Program.d.ts dist/index.html; do
+            if [ ! -f "$f" ]; then
+              echo "::error::$f was not emitted"
+              exit 1
+            fi
+          done
+
+          # The C# sources are deliberately not copied into the output; the source map
+          # already carries them.
+          if ls dist/*.csjs >/dev/null 2>&1; then
+            echo "::error::C# sources leaked into the output"
+            exit 1
+          fi
+
+          # Executes the emitted module on Node, which is also the check that it is valid ESM.
+          cs2js run .
+
+  # ---------------------------------------------------------------------------------------
+  # Publishing happens only for a tag, and only through an environment, so it can be gated on
+  # a human approval. A version on nuget.org can never be deleted, only unlisted.
+  # ---------------------------------------------------------------------------------------
+  publish:
+    name: Publish to NuGet
+    runs-on: ubuntu-latest
+    needs: [test, windows, pack, smoke]
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment: nuget
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: nupkg
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Push
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: |
+          if [ -z "$NUGET_API_KEY" ]; then
+            echo "::error::NUGET_API_KEY is not set on the nuget environment"
+            exit 1
+          fi
+          dotnet nuget push "nupkg/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

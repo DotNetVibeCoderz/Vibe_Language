@@ -1,5 +1,7 @@
 # CSJS
 
+[![CI](https://github.com/DotNetVibeCoderz/Vibe_Language/actions/workflows/ci.yml/badge.svg)](https://github.com/DotNetVibeCoderz/Vibe_Language/actions/workflows/ci.yml)
+
 **C# that runs as JavaScript.** A transpiler, an interop layer, a CLI, an editor with an AI
 assistant, and a browser playground — so a .NET developer can write for the web without leaving
 C#.
@@ -255,8 +257,8 @@ Full documentation lives in [`docs/`](docs/):
 ## Build from source
 
 ```bash
-git clone https://github.com/gravicode/csjs
-cd csjs
+git clone https://github.com/DotNetVibeCoderz/Vibe_Language
+cd Vibe_Language/CSJS
 dotnet build CSJS.slnx
 dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj
 ```

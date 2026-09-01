@@ -8,6 +8,7 @@
 | [CLI reference](cli.md) | Every command, every `csjs.json` field, every diagnostic. |
 | [CSJSGen](csjsgen.md) | The desktop editor and Jack The Code Bender. |
 | [Architecture](architecture.md) | How the engine works, and why it is built this way. |
+| [Releasing](releasing.md) | The packages, the CI workflow, and how a version gets published. |
 
 Also worth reading directly:
 

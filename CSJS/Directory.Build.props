@@ -12,10 +12,38 @@
     <Company>Gravicode Studios</Company>
     <Product>CSJS</Product>
     <Copyright>Copyright (c) Gravicode Studios. Led by Kang Fadhil.</Copyright>
-    <PackageProjectUrl>https://github.com/gravicode/csjs</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/gravicode/csjs</RepositoryUrl>
+
+    <!--
+      CSJS lives in a subdirectory of the Vibe_Language repository, so the two URLs differ on
+      purpose. PackageProjectUrl is where a reader should land — the project's own folder.
+      RepositoryUrl has to be the repository itself: NuGet and Source Link treat it as a clone
+      target, and a /tree/ path is not one.
+    -->
+    <PackageProjectUrl>https://github.com/DotNetVibeCoderz/Vibe_Language/tree/main/CSJS</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/DotNetVibeCoderz/Vibe_Language</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryBranch>main</RepositoryBranch>
+
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageTags>csharp;javascript;transpiler;csjs;web</PackageTags>
+    <PackageTags>csharp;javascript;transpiler;csjs;web;esnext;typescript;source-maps</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+
+    <!-- A published package should carry its own symbols; a stack trace without them is noise. -->
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+    <!-- Every package lands here, so packing the solution fills one folder for CI to upload. -->
+    <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/nupkg</PackageOutputPath>
   </PropertyGroup>
+
+  <!--
+    The README shown on the package page. The repository README is not reusable here: its image
+    and document links are relative, and nuget.org resolves them against its own host, so every
+    one of them would 404. This copy carries absolute links only.
+  -->
+  <ItemGroup Condition="'$(IsPackable)' != 'false' AND '$(PackageId)' != ''">
+    <None Include="$(MSBuildThisFileDirectory)build/nuget-readme.md"
+          Pack="true" PackagePath="README.md" Visible="false" />
+  </ItemGroup>
 
 </Project>

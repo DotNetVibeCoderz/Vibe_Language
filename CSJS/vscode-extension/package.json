@@ -106,5 +106,6 @@
       }
     }
   },
-  "repository": { "type": "git", "url": "https://github.com/gravicode/csjs" }
+  "repository": { "type": "git", "url": "https://github.com/DotNetVibeCoderz/Vibe_Language" },
+  "homepage": "https://github.com/DotNetVibeCoderz/Vibe_Language/tree/main/CSJS"
 }
