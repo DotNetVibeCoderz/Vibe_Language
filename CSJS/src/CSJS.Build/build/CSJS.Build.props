@@ -1,0 +1,36 @@
+<Project>
+
+  <!--
+    CSJS.Build defaults. Every property can be set in the project file before or after this
+    import; the targets file reads them only when the build runs.
+    Gravicode Studios — led by Kang Fadhil.
+  -->
+
+  <PropertyGroup>
+    <!-- Set to false to compile the project normally without transpiling it. -->
+    <CsjsEnabled Condition="'$(CsjsEnabled)' == ''">true</CsjsEnabled>
+
+    <!-- The static site root `dotnet run` serves. -->
+    <CsjsWebRoot Condition="'$(CsjsWebRoot)' == ''">$(MSBuildProjectDirectory)/wwwroot/</CsjsWebRoot>
+    <CsjsHostPort Condition="'$(CsjsHostPort)' == ''">5080</CsjsHostPort>
+
+    <!-- Where emitted .js, .d.ts, and .js.map files go. Relative paths are project-relative. -->
+    <CsjsOutputPath Condition="'$(CsjsOutputPath)' == ''">wwwroot/js/</CsjsOutputPath>
+
+    <!-- Folder whose structure the output mirrors; `src` turns src/App.cs into App.js. -->
+    <CsjsSourceRoot Condition="'$(CsjsSourceRoot)' == ''">.</CsjsSourceRoot>
+
+    <CsjsTypeDefinitions Condition="'$(CsjsTypeDefinitions)' == ''">true</CsjsTypeDefinitions>
+    <CsjsSourceMaps Condition="'$(CsjsSourceMaps)' == ''">true</CsjsSourceMaps>
+
+    <!-- `esm` (default) or `script`. -->
+    <CsjsModule Condition="'$(CsjsModule)' == ''">esm</CsjsModule>
+
+    <!-- Append a call to Main(), for a module that is the whole program. -->
+    <CsjsEntryPoint Condition="'$(CsjsEntryPoint)' == ''">false</CsjsEntryPoint>
+
+    <!-- CSJS tracks C# as it lands, so the newest language features are on by default. -->
+    <LangVersion Condition="'$(LangVersion)' == ''">preview</LangVersion>
+  </PropertyGroup>
+
+</Project>

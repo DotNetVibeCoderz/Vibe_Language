@@ -27,6 +27,11 @@ internal static class Cli
                 "watch" => Watch(args.Skip(1).ToArray()),
                 "serve" => Serve(args.Skip(1).ToArray()),
                 "new" or "init" => NewProject(args.Skip(1).ToArray()),
+                "lsp" => LspServer.RunStdio(),
+                "bind" => PackageCommands.Bind(args.Skip(1).ToArray()),
+                "add" => PackageCommands.Add(args.Skip(1).ToArray()),
+                "compile" => MsBuildCommands.Compile(args.Skip(1).ToArray()),
+                "host" => MsBuildCommands.Host(args.Skip(1).ToArray()),
                 "version" or "--version" => PrintVersion(),
                 _ => UnknownCommand(args[0]),
             };
@@ -53,7 +58,7 @@ internal static class Cli
         var callEntryPoint = args.Contains("--entry");
 
         Console.WriteLine($"Building {project.Name}...");
-        var report = new BuildRunner(project, directory, callEntryPoint).Run();
+        var report = new BuildRunner(project, directory, callEntryPoint, BuildSettings.From(project, args)).Run();
 
         if (!report.Success)
         {
@@ -61,8 +66,7 @@ internal static class Cli
             return 1;
         }
 
-        var warnings = report.WarningCount > 0 ? $", {report.WarningCount} warning(s)" : "";
-        Console.WriteLine($"Built {report.ModuleCount} module(s) in {report.Duration.TotalMilliseconds:F0} ms{warnings}.");
+        Console.WriteLine(report.Summary());
         return 0;
     }
 
@@ -81,11 +85,11 @@ internal static class Cli
 
         var directory = ResolveDirectory(args);
         var project = CsjsProject.Load(directory);
-        var report = new BuildRunner(project, directory, emitEntryPointCall: true).Run(quiet: true);
+        var report = new BuildRunner(project, directory, emitEntryPointCall: true, BuildSettings.From(project, args)).Run(quiet: true);
         if (!report.Success) return 1;
 
         var outputRoot = project.ResolveOutputRoot(directory);
-        var entry = FindEntryPoint(outputRoot);
+        var entry = report.BundlePath ?? FindEntryPoint(outputRoot);
         if (entry is null)
         {
             Console.Error.WriteLine($"No entry module found in {outputRoot}. Expected Program.js or Main.js.");
@@ -105,7 +109,8 @@ internal static class Cli
         {
             var options = new CSJS.Core.TranspileOptions
             {
-                EmitSourceMap = false,
+                // Maps make Node's stack traces point at the .csjs file rather than the temp copy.
+                EmitSourceMap = true,
                 EmitTypeDefinitions = false,
                 // The module is the whole program here, so it has to invoke its own Main.
                 EmitEntryPointCall = true,
@@ -120,7 +125,12 @@ internal static class Cli
             if (!result.Success) return 1;
 
             foreach (var module in result.Modules)
+            {
                 File.WriteAllText(Path.Combine(work, module.FileName), module.JavaScript);
+                if (module.SourceMap is not null)
+                    File.WriteAllText(Path.Combine(work, module.FileName + ".map"), CSJS.Core.Bundling.SourceMapDocument.WithSourceRoot(
+                        module.SourceMap, new Uri(Path.GetDirectoryName(full)! + Path.DirectorySeparatorChar).AbsoluteUri));
+            }
 
             if (result.RuntimeJavaScript is not null)
                 File.WriteAllText(Path.Combine(work, "csjs-runtime.js"), result.RuntimeJavaScript);
@@ -156,7 +166,8 @@ internal static class Cli
         if (!File.Exists(packageJson))
             File.WriteAllText(packageJson, "{\"type\":\"module\"}");
 
-        var startInfo = new ProcessStartInfo("node", $"\"{entryPath}\"")
+        // --enable-source-maps makes an uncaught exception's stack name the C# file and line.
+        var startInfo = new ProcessStartInfo("node", $"--enable-source-maps \"{entryPath}\"")
         {
             UseShellExecute = false,
             WorkingDirectory = directory,
@@ -189,7 +200,7 @@ internal static class Cli
         var directory = ResolveDirectory(args);
         var project = CsjsProject.Load(directory);
         var sourceRoot = project.ResolveSourceRoot(directory);
-        var runner = new BuildRunner(project, directory);
+        var runner = new BuildRunner(project, directory, settings: BuildSettings.From(project, args));
 
         Console.WriteLine($"Watching {sourceRoot} — press Ctrl+C to stop.");
         RebuildAndReport(runner);
@@ -246,7 +257,7 @@ internal static class Cli
     {
         var report = runner.Run(quiet: true);
         if (report.Success)
-            Console.WriteLine($"  OK — {report.ModuleCount} module(s), {report.Duration.TotalMilliseconds:F0} ms");
+            Console.WriteLine("  OK — " + report.Summary());
         else
             Console.WriteLine($"  {report.ErrorCount} error(s)");
     }
@@ -260,6 +271,10 @@ internal static class Cli
         var directory = ResolveDirectory(args);
         var project = CsjsProject.Load(directory);
         var port = ReadOption(args, "--port") is { } p && int.TryParse(p, out var parsed) ? parsed : 5080;
+
+        // Live reload by default; `--no-reload` is the plain static server below.
+        if (!args.Contains("--no-reload"))
+            return new DevServer(project, directory, port, reload: true, BuildSettings.From(project, args)).Run();
 
         var report = new BuildRunner(project, directory).Run(quiet: true);
         if (!report.Success) return 1;
@@ -446,7 +461,8 @@ internal static class Cli
 
     private static string ResolveDirectory(string[] args)
     {
-        var positional = args.FirstOrDefault(a => !a.StartsWith('-'));
+        // `--port 8080` is an option and its value, not a directory called 8080.
+        var positional = args.Where((a, i) => !a.StartsWith('-') && (i == 0 || args[i - 1] != "--port")).FirstOrDefault();
         return Path.GetFullPath(positional ?? Directory.GetCurrentDirectory());
     }
 
@@ -482,12 +498,26 @@ internal static class Cli
               cs2js run [dir|file]      Build, then execute with Node
               cs2js watch [dir]         Rebuild whenever a source file changes
               cs2js serve [dir]         Build and serve over HTTP
+              cs2js bind <file.d.ts>    Generate C# bindings from TypeScript declarations
+              cs2js add <pkg>[@ver] [dir]  Fetch an npm package and generate its bindings
+              cs2js lsp                 Language server over stdio, for editors
+              cs2js host [dir]          Serve a folder over HTTP (no build)
+              cs2js compile ...         Transpile an explicit file list (used by CSJS.Build)
               cs2js version             Print the version
 
             Options:
               --port <n>                Port for `serve` (default 5080)
               --entry                   Append the call to Main() when building, for a host
                                         that loads the emitted module itself (e.g. Electron)
+              --bundle                  Write one bundle.js (no external bundler needed)
+              --minify                  Bundle and minify
+              --force                   Ignore the build cache; rebuild everything
+                                        (alias: --no-incremental)
+              --no-reload               `serve` without live reload
+              --module <specifier>      For `bind`: the module the bindings import from
+              --namespace <ns>          For `bind` and `add`: the C# namespace to generate
+              --out <file.cs>           For `bind`: write here instead of to stdout
+              --global                  For `bind`: bind through globals (UMD / script tag)
 
             Project settings live in csjs.json. Every value has a default, so a project
             with sources in src/ and no config file builds without one.

@@ -18,13 +18,15 @@ public sealed class DtsEmitter
 {
     private readonly SemanticModel _model;
     private readonly NameResolver _names;
+    private readonly ProgramAnalysis _analysis;
     private readonly StringBuilder _sb = new();
     private int _depth;
 
-    public DtsEmitter(SemanticModel model, NameResolver names)
+    public DtsEmitter(SemanticModel model, NameResolver names, ProgramAnalysis? analysis = null)
     {
         _model = model;
         _names = names;
+        _analysis = analysis ?? ProgramAnalysis.Empty;
     }
 
     public string Emit(CompilationUnitSyntax unit, string moduleName)
@@ -66,6 +68,7 @@ public sealed class DtsEmitter
     {
         var symbol = _model.GetDeclaredSymbol(declaration) as INamedTypeSymbol;
         if (symbol is null || !IsExported(symbol)) return;
+        if (_analysis.InlinedEnums.Contains(symbol)) return;
 
         var name = _names.TypeName(symbol);
         EmitDoc(declaration);
@@ -111,7 +114,9 @@ public sealed class DtsEmitter
 
         EmitDoc(declaration);
 
-        var baseClause = symbol.BaseType is { SpecialType: not SpecialType.System_Object, TypeKind: TypeKind.Class } baseType
+        // A struct's base is System.ValueType, which has no JavaScript counterpart to extend.
+        var baseClause = symbol.BaseType is { SpecialType: not (SpecialType.System_Object or SpecialType.System_ValueType),
+                                              TypeKind: TypeKind.Class } baseType
             ? $" extends {_names.TypeName(baseType)}"
             : "";
 
@@ -126,6 +131,16 @@ public sealed class DtsEmitter
         _depth++;
         EmitConstructors(symbol);
         EmitMemberSignatures(symbol, includeStatics: true, isInterface: false);
+
+        // A struct carries the two helpers that give it value semantics.
+        if (symbol.TypeKind == TypeKind.Struct)
+        {
+            var name = _names.TypeName(symbol);
+            Line($"/** A copy, as assigning a struct produces in C#. */");
+            Line($"$clone(): {name};");
+            Line($"/** The zero value, as default({name}) produces in C#. */");
+            Line($"static $default(): {name};");
+        }
         _depth--;
         Line("}");
         Line();
@@ -182,6 +197,15 @@ public sealed class DtsEmitter
 
                 case IMethodSymbol { MethodKind: MethodKind.Ordinary } method:
                     var returnType = MethodReturnType(method);
+
+                    // ref/out parameters come back as extra tuple elements after the result.
+                    var byRef = method.Parameters.Where(p => p.RefKind is RefKind.Ref or RefKind.Out).ToList();
+                    if (byRef.Count > 0)
+                    {
+                        var elements = new[] { method.ReturnsVoid ? "undefined" : returnType }
+                            .Concat(byRef.Select(p => TypeMap.ToTypeScript(p.Type)));
+                        returnType = $"[{string.Join(", ", elements)}]";
+                    }
                     Line($"{prefix}{_names.MemberName(method)}{TypeParameters(method)}({Parameters(method)}): {returnType};");
                     break;
             }
@@ -211,7 +235,8 @@ public sealed class DtsEmitter
     {
         if (method is null) return "";
 
-        return string.Join(", ", method.Parameters.Select(p =>
+        // An out parameter is not passed in at all; it comes back in the result tuple.
+        return string.Join(", ", method.Parameters.Where(p => p.RefKind != RefKind.Out).Select(p =>
         {
             var name = NameResolver.Escape(p.Name);
             var type = TypeMap.ToTypeScript(p.Type);

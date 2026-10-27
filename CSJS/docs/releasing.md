@@ -1,6 +1,6 @@
 # Releasing
 
-Five packages ship from this repository:
+Seven packages ship from this repository:
 
 | Package | What it is |
 | --- | --- |
@@ -9,9 +9,15 @@ Five packages ship from this repository:
 | `CSJS.Cli` | The tool under `dotnet cs2js`. |
 | `CSJS.Cli.Standalone` | The same tool under `cs2js`. |
 | `CSJS.Testing` | C# tests executed on a JavaScript runtime. |
+| `CSJS.Build` | MSBuild integration: `dotnet build` transpiles an ordinary `.csproj`. Carries the CLI under `tools/`. |
+| `CSJS.Templates` | `dotnet new` templates: `csjs-app`, `csjs-lib`, `csjs-aspnet`, `csjs-blazor`, `csjs-console`. |
 
-Shared metadata — version, authors, URLs, licence, README — lives in `Directory.Build.props`,
-so it is set once rather than five times.
+Shared metadata — version, authors, URLs, licence, README, icon — lives in
+`Directory.Build.props`, so it is set once rather than seven times. The icon is
+`build/icon/icon.png`, rendered from `build/icon/icon.svg` (see the README beside it).
+
+`CSJS.Templates` rewrites every template's `CSJS.Build` reference to its own version when it
+packs, so the two must be packed at the same version — CI packs all seven in one step.
 
 ## Where the workflow lives
 
@@ -42,9 +48,11 @@ is; a push to `main` runs the whole thing regardless of which project changed.
 | --- | --- | --- |
 | `test` | Ubuntu | Builds the engine and runs the test suite. Node is installed because the semantics tests execute the emitted JavaScript. |
 | `windows` | Windows | Builds the whole solution. CSJSGen targets `net10.0-windows`, so it cannot be checked anywhere else. |
-| `pack` | Ubuntu | Packs all five packages and uploads them as an artifact. |
+| `pack` | Ubuntu | Packs all seven packages and uploads them as an artifact. |
+| `vsix` | Ubuntu | Packages the VS Code extension and checks its language client is inside. |
 | `smoke` | Ubuntu | Installs the *packed* tool, scaffolds a project, builds it, and runs it. Unit tests cover the engine; this covers the packaging. |
-| `publish` | Ubuntu | Pushes to nuget.org. Tags only. |
+| `templates` | Ubuntu | Installs the packed templates, creates and builds a project from each against the packed `CSJS.Build`, runs the library template's Node tests, and checks an unmapped member fails the build with a located error. |
+| `publish` | Ubuntu | Pushes to nuget.org. Tags only, and only after every other job passed. |
 
 Every push produces downloadable packages. Only a tag publishes.
 
@@ -65,9 +73,10 @@ downloaded from a branch build can never be mistaken for a release.
 
 ## The API key
 
-`publish` reads `secrets.NUGET_API_KEY` from an environment named `nuget`. Create it under
-**Settings → Environments**, and add a required reviewer if you want publishing to pause for
-approval.
+`publish` reads `secrets.NUGET_API_KEY`. A **repository** secret of that name is enough — that is
+how it is set up now. The job runs in an environment named `nuget`, which GitHub creates on first
+use; to make publishing pause for approval, add a required reviewer to that environment under
+**Settings → Environments** (an environment secret of the same name would take precedence).
 
 Generate the key at <https://www.nuget.org/account/apikeys>. Scope it to **Push** and, for the
 first publish, to the glob `CSJS.*` — the package IDs do not exist yet, so an ID-scoped key
@@ -83,6 +92,8 @@ dotnet pack src/CSJS.Interop     -c Release
 dotnet pack src/CSJS.Testing     -c Release
 dotnet pack src/CSJS.Cli         -c Release
 dotnet pack src/CSJS.Cli.Standalone -c Release
+dotnet pack src/CSJS.Build       -c Release
+dotnet pack src/CSJS.Templates   -c Release
 
 dotnet nuget push "artifacts/nupkg/*.nupkg" \
   --api-key "$NUGET_API_KEY" \

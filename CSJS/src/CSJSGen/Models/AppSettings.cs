@@ -40,6 +40,13 @@ public sealed class AppSettings
     /// </summary>
     public string Deployment { get; set; } = "";
 
+    /// <summary>
+    /// Panel widths and visibility as the last session left them. Written separately from the
+    /// rest by <see cref="SaveLayout"/>, so a drag never rewrites keys and a settings save
+    /// never overwrites the layout with the values read at startup.
+    /// </summary>
+    public WorkspaceLayout Layout { get; set; } = new();
+
     /// <summary>True when the active provider has everything it needs to run.</summary>
     public bool IsConfigured => Provider switch
     {
@@ -60,6 +67,7 @@ public sealed class AppSettings
             TavilyApiKey = Read("Tools.Tavily.ApiKey"),
             SessionStore = Read("App.SessionStore"),
             Theme = Read("App.Theme") is { Length: > 0 } theme ? theme : "dark",
+            Layout = WorkspaceLayout.Load(Read),
         };
 
         settings.ApplyProviderSettings();
@@ -160,14 +168,103 @@ public sealed class AppSettings
         ConfigurationManager.RefreshSection("appSettings");
     }
 
+    /// <summary>
+    /// Writes only the layout keys and the theme. Called on every settled layout change, so it
+    /// deliberately leaves provider settings and keys alone.
+    /// </summary>
+    public static void SaveLayout(WorkspaceLayout layout, string theme)
+    {
+        lock (SaveLock)
+        {
+            var config = ConfigurationManager.OpenExeConfiguration(ConfigurationUserLevel.None);
+
+            void Set(string key, string value)
+            {
+                if (config.AppSettings.Settings[key] is null) config.AppSettings.Settings.Add(key, value);
+                else config.AppSettings.Settings[key].Value = value;
+            }
+
+            foreach (var (key, value) in layout.ToPairs()) Set(key, value);
+            Set("App.Theme", theme);
+
+            config.Save(ConfigurationSaveMode.Modified);
+            ConfigurationManager.RefreshSection("appSettings");
+        }
+    }
+
+    // Layout saves arrive from a timer thread and from shutdown; two writers racing on the same
+    // file would lose one of them.
+    private static readonly object SaveLock = new();
+
     private static string Read(string key) => ConfigurationManager.AppSettings[key] ?? "";
 
-    private static T ParseEnum<T>(string value, T fallback) where T : struct
+    internal static T ParseEnum<T>(string value, T fallback) where T : struct
         => Enum.TryParse<T>(value, ignoreCase: true, out var parsed) ? parsed : fallback;
 
-    private static double ParseDouble(string value, double fallback)
+    internal static double ParseDouble(string value, double fallback)
         => double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
 
-    private static int ParseInt(string value, int fallback)
+    internal static int ParseInt(string value, int fallback)
         => int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) ? parsed : fallback;
+}
+
+/// <summary>
+/// The workspace layout: which panels are showing and how wide they are. Bounds live here so a
+/// hand-edited or stale config cannot restore a panel too narrow to grab or wide enough to
+/// squeeze the editor out — the same bounds <see cref="AppState"/> applies to a drag.
+/// </summary>
+public sealed record WorkspaceLayout
+{
+    public const double ExplorerMin = 150, ExplorerMax = 480, ExplorerDefault = 232;
+    public const double PropertiesMin = 160, PropertiesMax = 480, PropertiesDefault = 248;
+    public const double ChatMin = 280, ChatMax = 720, ChatDefault = 400;
+
+    public bool ShowExplorer { get; init; } = true;
+    public bool ShowProperties { get; init; } = true;
+    public bool ShowChat { get; init; } = true;
+    public bool ShowLineNumbers { get; init; } = true;
+
+    public double ExplorerWidth { get; init; } = ExplorerDefault;
+    public double PropertiesWidth { get; init; } = PropertiesDefault;
+    public double ChatWidth { get; init; } = ChatDefault;
+
+    /// <summary>Reads the layout keys, falling back to defaults and clamping what it finds.</summary>
+    public static WorkspaceLayout Load(Func<string, string> read) => new()
+    {
+        ShowExplorer = ParseBool(read("Layout.ShowExplorer"), true),
+        ShowProperties = ParseBool(read("Layout.ShowProperties"), true),
+        ShowChat = ParseBool(read("Layout.ShowChat"), true),
+        ShowLineNumbers = ParseBool(read("Layout.ShowLineNumbers"), true),
+        ExplorerWidth = Width(read("Layout.ExplorerWidth"), ExplorerDefault, ExplorerMin, ExplorerMax),
+        PropertiesWidth = Width(read("Layout.PropertiesWidth"), PropertiesDefault, PropertiesMin, PropertiesMax),
+        ChatWidth = Width(read("Layout.ChatWidth"), ChatDefault, ChatMin, ChatMax),
+    };
+
+    /// <summary>The layout as config keys and invariant-culture values.</summary>
+    public IEnumerable<(string Key, string Value)> ToPairs()
+    {
+        yield return ("Layout.ShowExplorer", Bool(ShowExplorer));
+        yield return ("Layout.ShowProperties", Bool(ShowProperties));
+        yield return ("Layout.ShowChat", Bool(ShowChat));
+        yield return ("Layout.ShowLineNumbers", Bool(ShowLineNumbers));
+        yield return ("Layout.ExplorerWidth", Number(ExplorerWidth));
+        yield return ("Layout.PropertiesWidth", Number(PropertiesWidth));
+        yield return ("Layout.ChatWidth", Number(ChatWidth));
+    }
+
+    private static double Width(string value, double fallback, double min, double max)
+    {
+        var parsed = AppSettings.ParseDouble(value, fallback);
+
+        // NaN and infinity parse successfully and would survive a clamp, so they are rejected
+        // outright rather than producing a CSS track like "NaNpx".
+        return double.IsFinite(parsed) ? Math.Clamp(parsed, min, max) : fallback;
+    }
+
+    private static bool ParseBool(string value, bool fallback)
+        => bool.TryParse(value, out var parsed) ? parsed : fallback;
+
+    private static string Bool(bool value) => value ? "true" : "false";
+
+    private static string Number(double value) => Math.Round(value).ToString(CultureInfo.InvariantCulture);
 }

@@ -15,13 +15,17 @@ public enum DiagnosticSeverity
 /// <param name="FilePath">Source file, when known.</param>
 /// <param name="Line">1-based line.</param>
 /// <param name="Column">1-based column.</param>
+/// <param name="EndLine">1-based line where the reported span ends, or 0 when only the start is known.</param>
+/// <param name="EndColumn">1-based column (exclusive) where the reported span ends, or 0 when unknown.</param>
 public sealed record CsjsDiagnostic(
     string Id,
     DiagnosticSeverity Severity,
     string Message,
     string? FilePath = null,
     int Line = 0,
-    int Column = 0)
+    int Column = 0,
+    int EndLine = 0,
+    int EndColumn = 0)
 {
     public override string ToString()
     {

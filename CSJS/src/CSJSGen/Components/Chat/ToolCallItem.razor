@@ -1,0 +1,86 @@
+@* One kernel function Jack invoked: collapsed to a single line, expandable to its arguments and
+   result. What went in is source side (violet); what came back is emitted side (amber). *@
+
+<details class="tool-call @OutcomeClass">
+    <summary>
+        <span class="tool-status" aria-hidden="true">@Glyph</span>
+        <span class="tool-name">@Call.QualifiedName</span>
+        @if (Preview.Length > 0)
+        {
+            <span class="tool-preview">@Preview</span>
+        }
+        <span class="tool-meta">@Meta</span>
+    </summary>
+
+    <div class="tool-detail">
+        @if (Call.Arguments.Count > 0)
+        {
+            <div class="tool-section args">
+                <div class="tool-label">argumen</div>
+                @foreach (var (name, value) in Call.Arguments)
+                {
+                    <div class="tool-arg">
+                        <span class="tool-arg-name">@name</span>
+                        <pre>@value</pre>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (Call.Outcome != ToolCallOutcome.Running)
+        {
+            <div class="tool-section result">
+                <div class="tool-label">@(Call.Outcome == ToolCallOutcome.Error ? "galat" : "hasil")</div>
+                <pre>@(Call.Result.Length > 0 ? Call.Result : "(kosong)")</pre>
+            </div>
+        }
+    </div>
+</details>
+
+@code {
+    [Parameter, EditorRequired] public ToolCall Call { get; set; } = new();
+
+    private string OutcomeClass => Call.Outcome switch
+    {
+        ToolCallOutcome.Running => "running",
+        ToolCallOutcome.Ok => "ok",
+        ToolCallOutcome.Reported => "reported",
+        _ => "error",
+    };
+
+    private string Glyph => Call.Outcome switch
+    {
+        ToolCallOutcome.Running => "◌",
+        ToolCallOutcome.Ok => "✓",
+        ToolCallOutcome.Reported => "!",
+        _ => "✕",
+    };
+
+    private string Meta => Call.Outcome switch
+    {
+        ToolCallOutcome.Running => "berjalan…",
+        ToolCallOutcome.Reported => $"gagal · {Duration}",
+        ToolCallOutcome.Error => $"galat · {Duration}",
+        _ => Duration,
+    };
+
+    private string Duration => Call.DurationMs < 1000
+        ? $"{Call.DurationMs:F0} ms"
+        : $"{Call.DurationMs / 1000:F1} s";
+
+    /// <summary>
+    /// The first argument's first line, so the collapsed row says what was asked — which snippet,
+    /// which query — without opening it.
+    /// </summary>
+    private string Preview
+    {
+        get
+        {
+            var first = Call.Arguments.Values.FirstOrDefault(v => v.Trim().Length > 0);
+            if (first is null) return "";
+
+            var line = first.Trim().Split('\n')[0].Trim();
+            return line.Length <= 48 ? line : line[..48].TrimEnd() + "…";
+        }
+    }
+}

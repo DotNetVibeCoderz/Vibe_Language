@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <!-- CSJS package icon. Violet is the C# (source) side, amber the JavaScript (emitted) side,
+       and the slanted gradient between them is the "seam" from the CSJS design system.
+       Gravicode Studios — led by Kang Fadhil. -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#231f33"/>
+      <stop offset="1" stop-color="#110e1a"/>
+    </linearGradient>
+    <linearGradient id="seam" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a78bfa"/>
+      <stop offset="0.5" stop-color="#f0abfc"/>
+      <stop offset="1" stop-color="#fbbf24"/>
+    </linearGradient>
+    <radialGradient id="violetGlow" cx="0.28" cy="0.34" r="0.45">
+      <stop offset="0" stop-color="#7c3aed" stop-opacity="0.38"/>
+      <stop offset="1" stop-color="#7c3aed" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="amberGlow" cx="0.74" cy="0.7" r="0.45">
+      <stop offset="0" stop-color="#d97706" stop-opacity="0.32"/>
+      <stop offset="1" stop-color="#d97706" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="blur" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="9"/>
+    </filter>
+    <clipPath id="tile"><rect x="16" y="16" width="480" height="480" rx="108"/></clipPath>
+  </defs>
+
+  <g clip-path="url(#tile)">
+    <rect x="16" y="16" width="480" height="480" fill="url(#bg)"/>
+    <rect x="16" y="16" width="480" height="480" fill="url(#violetGlow)"/>
+    <rect x="16" y="16" width="480" height="480" fill="url(#amberGlow)"/>
+
+    <!-- faint code lines: source on the left, output on the right -->
+    <g stroke-linecap="round" stroke-width="10" opacity="0.18">
+      <line x1="64" y1="330" x2="150" y2="330" stroke="#a78bfa"/>
+      <line x1="64" y1="364" x2="196" y2="364" stroke="#a78bfa"/>
+      <line x1="64" y1="398" x2="120" y2="398" stroke="#a78bfa"/>
+      <line x1="320" y1="112" x2="448" y2="112" stroke="#fbbf24"/>
+      <line x1="350" y1="146" x2="448" y2="146" stroke="#fbbf24"/>
+      <line x1="300" y1="180" x2="400" y2="180" stroke="#fbbf24"/>
+    </g>
+  </g>
+
+  <!-- the seam -->
+  <line x1="300" y1="78" x2="212" y2="434" stroke="url(#seam)" stroke-width="22" stroke-linecap="round" filter="url(#blur)" opacity="0.75"/>
+  <line x1="300" y1="78" x2="212" y2="434" stroke="url(#seam)" stroke-width="11" stroke-linecap="round"/>
+
+  <g font-family="'Cascadia Code','JetBrains Mono',Consolas,'DejaVu Sans Mono',monospace" font-weight="700">
+    <text x="58" y="250" font-size="148" fill="#a78bfa" letter-spacing="-6">C#</text>
+    <text x="262" y="414" font-size="148" fill="#fbbf24" letter-spacing="-6">JS</text>
+  </g>
+
+  <rect x="16.5" y="16.5" width="479" height="479" rx="107.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+</svg>

@@ -21,6 +21,7 @@ public sealed class BlazorHost : NativeControlHost
 {
     private WinForms.Form? _host;
     private BlazorWebView? _webView;
+    private IServiceProvider? _services;
 
     /// <summary>Raised once the WebView has initialised, so the shell can drop its overlay.</summary>
     public event Action? Ready;
@@ -31,13 +32,19 @@ public sealed class BlazorHost : NativeControlHost
             return base.CreateNativeControlCore(parent);
 
         var settings = AppSettings.Load();
+        _services = BuildServices(settings);
+
+        // Resolved now rather than on first use: nothing asks for it, and it has to be listening
+        // before the first panel is dragged.
+        var layout = _services.GetRequiredService<LayoutPersistence>();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => layout.Flush();
 
         _webView = new BlazorWebView
         {
             // Resolved against the app's base directory rather than the working directory, so
             // running from anywhere still finds the host page.
             HostPage = Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html"),
-            Services = BuildServices(settings),
+            Services = _services,
             BackColor = settings.Theme.Equals("light", StringComparison.OrdinalIgnoreCase)
                 ? System.Drawing.ColorTranslator.FromHtml("#f7f6fb")
                 : System.Drawing.ColorTranslator.FromHtml("#171520"),
@@ -62,8 +69,8 @@ public sealed class BlazorHost : NativeControlHost
         _host.Controls.Add(_webView);
         _host.Show();
 
-        // The folder picker is modal on this form's message loop, so it needs the form itself.
-        Services.FolderPicker.UseOwner(_host);
+        // The native dialogs are modal on this form's message loop, so it needs the form itself.
+        Services.NativeDialogs.UseOwner(_host);
 
         ObserveBounds();
 
@@ -122,6 +129,12 @@ public sealed class BlazorHost : NativeControlHost
         }
     }
 
+    /// <summary>
+    /// Writes any layout change still waiting out its debounce. Called as the window closes, so
+    /// the last drag before quitting is not lost.
+    /// </summary>
+    public void FlushLayout() => _services?.GetService<LayoutPersistence>()?.Flush();
+
     protected override void DestroyNativeControlCore(IPlatformHandle control)
     {
         _webView?.Dispose();
@@ -154,12 +167,21 @@ public sealed class BlazorHost : NativeControlHost
         services.AddSingleton<EditorBridge>();
         services.AddSingleton<KernelFactory>();
         services.AddSingleton<ProjectService>();
+        services.AddSingleton<CodeIntelligence>();
         services.AddSingleton<AttachmentService>();
         services.AddSingleton<MarkdownRenderer>();
-        services.AddSingleton<AppState>();
+        // The layout a previous session left is restored before anything renders, so panels
+        // open at their saved widths instead of jumping there.
+        services.AddSingleton(_ =>
+        {
+            var state = new AppState();
+            state.Restore(settings.Layout, settings.Theme);
+            return state;
+        });
+        services.AddSingleton(provider => new LayoutPersistence(provider.GetRequiredService<AppState>()));
         services.AddSingleton<PreviewServer>();
         services.AddSingleton<NodeRunner>();
-        services.AddSingleton<FolderPicker>();
+        services.AddSingleton<NativeDialogs>();
 
         services.AddSingleton(provider => new ChatService(
             provider.GetRequiredService<KernelFactory>(),

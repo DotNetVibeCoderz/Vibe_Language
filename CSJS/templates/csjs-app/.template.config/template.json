@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "Gravicode Studios",
+  "classifications": [
+    "CSJS",
+    "Web",
+    "Browser"
+  ],
+  "identity": "Csjs.App",
+  "name": "CSJS Browser App",
+  "shortName": "csjs-app",
+  "description": "A browser app written in C#. An ordinary .csproj, so Visual Studio, Rider, and VS Code give full IntelliSense; `dotnet build` transpiles it to JavaScript and `dotnet run` serves it. No global tool needed.",
+  "tags": {
+    "language": "C#",
+    "type": "project"
+  },
+  "sourceName": "CsjsApp",
+  "preferNameDirectory": true,
+  "symbols": {
+    "port": {
+      "type": "parameter",
+      "datatype": "integer",
+      "description": "Port `dotnet run` serves the app on.",
+      "defaultValue": "5080",
+      "replaces": "5080"
+    }
+  },
+  "sources": [
+    {
+      "source": "./",
+      "target": "./",
+      "exclude": [
+        ".template.config/**",
+        "**/[Bb]in/**",
+        "**/[Oo]bj/**",
+        "**/wwwroot/js/**",
+        "**/*.user",
+        "**/.vs/**"
+      ]
+    }
+  ],
+  "postActions": [
+    {
+      "description": "Restore NuGet packages required by this project.",
+      "manualInstructions": [ { "text": "Run 'dotnet restore'" } ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
+    }
+  ]
+}

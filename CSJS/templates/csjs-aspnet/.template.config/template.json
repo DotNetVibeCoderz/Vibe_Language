@@ -9,7 +9,7 @@
   "identity": "Csjs.AspNet",
   "name": "CSJS ASP.NET + JS",
   "shortName": "csjs-aspnet",
-  "description": "An ASP.NET Core app whose browser code is written in C#. The build transpiles C# to JavaScript automatically before the server starts.",
+  "description": "An ASP.NET Core app whose browser code is written in C#. The client project transpiles C# to JavaScript on every build through CSJS.Build — no global tool needed.",
   "tags": {
     "language": "C#",
     "type": "project"
@@ -30,10 +30,20 @@
         "**/*.filelist",
         "**/*.lock.json",
         "**/.vs/**",
-        "**/wwwroot/js/*.csjs",
-        "**/wwwroot/js/*.js.map",
-        "**/.csjs-stamp"
+        "**/wwwroot/js/**"
       ]
+    }
+  ],
+  "postActions": [
+    {
+      "description": "Restore NuGet packages required by this project.",
+      "manualInstructions": [
+        {
+          "text": "Run 'dotnet restore'"
+        }
+      ],
+      "actionId": "210D431B-A78B-4D2F-B762-4ED3E3EA9025",
+      "continueOnError": true
     }
   ]
 }

@@ -1,0 +1,77 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CSJS.Templates: `dotnet new install CSJS.Templates` adds every template under templates/.
+
+    The templates reference CSJS.Build by version. In the repository that version is whatever was
+    current when the template was written; at pack time it is rewritten to this package's own
+    version, so a template from CSJS.Templates 0.3.0 always pulls CSJS.Build 0.3.0 — the
+    transpiler and the templates that exercise it ship as a matched set.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>CSJS.Templates</PackageId>
+    <PackageType>Template</PackageType>
+    <Title>CSJS project templates</Title>
+    <Description>`dotnet new` templates for CSJS, the C#-to-JavaScript transpiler: a browser app (csjs-app), an npm library (csjs-lib), ASP.NET Core with C# client code (csjs-aspnet), Blazor Server with CSJS interactivity (csjs-blazor), and a console program that runs in the browser (csjs-console).</Description>
+    <PackageTags>$(PackageTags);dotnet-new;templates</PackageTags>
+
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <IncludeSymbols>false</IncludeSymbols>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <!-- .template.config and .gitignore start with a dot, which NuGet excludes by default. -->
+    <NoDefaultExcludes>true</NoDefaultExcludes>
+    <NoWarn>$(NoWarn);NU5128;NU5110;NU5111</NoWarn>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+
+    <CsjsTemplatesSource>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../templates/'))</CsjsTemplatesSource>
+    <CsjsTemplatesStaging>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)templates/'))</CsjsTemplatesStaging>
+  </PropertyGroup>
+
+  <UsingTask TaskName="CsjsStampBuildVersion" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <Files ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="true" />
+      <Version ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        foreach (var file in Files)
+        {
+            var path = file.ItemSpec;
+            var text = File.ReadAllText(path);
+            var stamped = Regex.Replace(text,
+                "(Include=\"CSJS\\.(?:Build|Interop|Testing)\"\\s+Version=\")[^\"]*(\")",
+                "${1}" + Version + "${2}");
+            if (stamped != text) File.WriteAllText(path, stamped);
+        }
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="CsjsStageTemplates" BeforeTargets="_GetPackageFiles">
+    <ItemGroup>
+      <_CsjsTemplateFile Include="$(CsjsTemplatesSource)**\*"
+                         Exclude="$(CsjsTemplatesSource)README.md;$(CsjsTemplatesSource)**\bin\**;$(CsjsTemplatesSource)**\obj\**;$(CsjsTemplatesSource)**\dist\**;$(CsjsTemplatesSource)**\node_modules\**;$(CsjsTemplatesSource)**\wwwroot\js\**;$(CsjsTemplatesSource)**\.vs\**;$(CsjsTemplatesSource)**\*.user" />
+    </ItemGroup>
+
+    <RemoveDir Directories="$(CsjsTemplatesStaging)" />
+    <Copy SourceFiles="@(_CsjsTemplateFile)" DestinationFiles="@(_CsjsTemplateFile->'$(CsjsTemplatesStaging)%(RecursiveDir)%(Filename)%(Extension)')" />
+
+    <ItemGroup>
+      <_CsjsStagedProject Include="$(CsjsTemplatesStaging)**\*.csproj" />
+    </ItemGroup>
+    <CsjsStampBuildVersion Files="@(_CsjsStagedProject)" Version="$(PackageVersion)" />
+
+    <!-- Metadata is qualified so it batches over these files only, not every None item. -->
+    <ItemGroup>
+      <_CsjsPackContent Include="$(CsjsTemplatesStaging)**\*" />
+      <None Include="@(_CsjsPackContent)" Pack="true"
+            PackagePath="content\%(_CsjsPackContent.RecursiveDir)%(_CsjsPackContent.Filename)%(_CsjsPackContent.Extension)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

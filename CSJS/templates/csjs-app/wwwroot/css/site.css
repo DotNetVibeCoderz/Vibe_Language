@@ -1,0 +1,103 @@
+/* CSJS design system: violet is the C# side, amber the JavaScript side. */
+:root {
+  --ink: #171520;
+  --muted: #6b6880;
+  --surface: #ffffff;
+  --page: #f6f5fa;
+  --line: #e4e1ee;
+  --source: #7c3aed;
+  --output: #b45309;
+  --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  --sans: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #f7f6fb;
+    --muted: #a19db5;
+    --surface: #1e1b2b;
+    --page: #13111c;
+    --line: #2d2940;
+    --source: #a78bfa;
+    --output: #fbbf24;
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--page);
+  color: var(--ink);
+  font-family: var(--sans);
+}
+
+main {
+  max-width: 34rem;
+  margin: 4rem auto;
+  padding: 2rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+}
+
+/* The seam: the gradient rule between source and output. */
+header {
+  padding-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
+  border-bottom: 2px solid;
+  border-image: linear-gradient(90deg, var(--source), var(--output)) 1;
+}
+
+h1 { margin: 0; font-family: var(--mono); font-size: 1.6rem; }
+.tagline { margin: 0.4rem 0 0; color: var(--muted); }
+.cs { color: var(--source); font-family: var(--mono); font-weight: 600; }
+.js { color: var(--output); font-family: var(--mono); font-weight: 600; }
+
+form { display: flex; gap: 0.5rem; }
+
+input:not([type]) {
+  flex: 1;
+  font: inherit;
+  padding: 0.6rem 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.5rem;
+  background: transparent;
+  color: inherit;
+}
+
+button {
+  font: inherit;
+  font-family: var(--mono);
+  padding: 0.6rem 1rem;
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--source);
+  color: #fff;
+  cursor: pointer;
+}
+
+button.quiet { background: transparent; color: var(--muted); padding: 0.3rem 0.5rem; }
+button:hover { filter: brightness(1.1); }
+
+ul { list-style: none; padding: 0; margin: 1.25rem 0; }
+
+li {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.6rem 0.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+li.done span { text-decoration: line-through; color: var(--muted); }
+li input { accent-color: var(--output); width: 1.1rem; height: 1.1rem; }
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}

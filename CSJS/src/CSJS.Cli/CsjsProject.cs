@@ -53,6 +53,15 @@ public sealed class CsjsProject
     /// </summary>
     public bool Assets { get; set; } = true;
 
+    /// <summary>Single-file output for <c>cs2js build --bundle</c>; see <see cref="BundleConfig"/>.</summary>
+    public BundleConfig? Bundle { get; set; }
+
+    /// <summary>
+    /// npm packages added with <c>cs2js add</c>, pinned to the exact version their bindings were
+    /// generated from. The C# bindings live in the sources; this records where they came from.
+    /// </summary>
+    public SortedDictionary<string, string>? Dependencies { get; set; }
+
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -146,6 +155,10 @@ public sealed class CsjsProject
             if (full.StartsWith(outputRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                 continue;
 
+            // Nor the build's own cache stamp.
+            if (full.StartsWith(BuildCache.CacheDirectory(projectDirectory) + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                continue;
+
             var fromProject = Path.GetRelativePath(projectRoot, full);
             var segments = fromProject.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
             if (segments.Any(excluded.Contains)) continue;
@@ -173,4 +186,20 @@ public sealed class CsjsProject
 
     public string ResolveOutputRoot(string projectDirectory)
         => Path.GetFullPath(Path.Combine(projectDirectory, Output));
+}
+
+/// <summary>The <c>bundle</c> section of <c>csjs.json</c>.</summary>
+public sealed class BundleConfig
+{
+    /// <summary>Bundle on every build, without needing <c>--bundle</c>.</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>Bundle file name, relative to the output directory.</summary>
+    public string File { get; set; } = "bundle.js";
+
+    /// <summary>Minify the bundle, as <c>--minify</c> does.</summary>
+    public bool Minify { get; set; }
+
+    /// <summary>Keep writing the individual modules beside the bundle.</summary>
+    public bool Modules { get; set; }
 }

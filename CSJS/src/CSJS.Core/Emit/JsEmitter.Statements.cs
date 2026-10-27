@@ -441,19 +441,38 @@ public sealed partial class JsEmitter
 
     private void EmitReturn(ReturnStatementSyntax statement)
     {
+        // Inside a function with ref/out parameters, every exit hands those values back too.
+        var tail = _byRefReturn is { Count: > 0 } byRef ? ", " + string.Join(", ", byRef) : null;
+
         if (statement.Expression is null)
         {
-            Out.WriteLine("return;");
+            Out.WriteLine(tail is null ? "return;" : $"return [undefined{tail}];");
             return;
         }
 
-        Write("return ");
-        var method = statement.Ancestors().OfType<MethodDeclarationSyntax>().FirstOrDefault();
-        var expected = method is not null
-            ? (_ctx.Model.GetDeclaredSymbol(method)?.ReturnType)
-            : null;
-        EmitExpressionAs(statement.Expression, UnwrapTask(expected));
-        Out.WriteLine(";");
+        Write(tail is null ? "return " : "return [");
+        EmitExpressionAs(statement.Expression, UnwrapTask(ReturnTypeOf(statement)));
+        Out.WriteLine(tail is null ? ";" : $"{tail}];");
+    }
+
+    /// <summary>The declared return type of whatever function a return statement exits.</summary>
+    private ITypeSymbol? ReturnTypeOf(ReturnStatementSyntax statement)
+    {
+        foreach (var ancestor in statement.Ancestors())
+        {
+            switch (ancestor)
+            {
+                case AnonymousFunctionExpressionSyntax lambda:
+                    return (_ctx.Model.GetSymbolInfo(lambda).Symbol as IMethodSymbol)?.ReturnType;
+                case LocalFunctionStatementSyntax local:
+                    return (_ctx.Model.GetDeclaredSymbol(local) as IMethodSymbol)?.ReturnType;
+                case BaseMethodDeclarationSyntax or AccessorDeclarationSyntax:
+                    return (_ctx.Model.GetDeclaredSymbol(ancestor) as IMethodSymbol)?.ReturnType;
+                case PropertyDeclarationSyntax or IndexerDeclarationSyntax:
+                    return (_ctx.Model.GetDeclaredSymbol(ancestor) as IPropertySymbol)?.Type;
+            }
+        }
+        return null;
     }
 
     private static ITypeSymbol? UnwrapTask(ITypeSymbol? type)
@@ -644,7 +663,7 @@ public sealed partial class JsEmitter
         }
 
         Write("yield ");
-        if (statement.Expression is not null) EmitExpression(statement.Expression);
+        if (statement.Expression is not null) EmitValue(statement.Expression);
         Out.WriteLine(";");
     }
 
@@ -663,7 +682,11 @@ public sealed partial class JsEmitter
 
         var previous = _inIterator;
         _inIterator = isIterator;
-        Out.InBlock(() => EmitStatementsOf(function.Body, function.ExpressionBody));
+        Out.InBlock(() =>
+        {
+            if (symbol is not null) EmitFunctionBody(symbol, function.Body, function.ExpressionBody);
+            else EmitStatementsOf(function.Body, function.ExpressionBody);
+        });
         _inIterator = previous;
 
         Out.WriteLine("}");

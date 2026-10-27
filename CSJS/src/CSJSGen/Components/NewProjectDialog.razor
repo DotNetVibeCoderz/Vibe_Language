@@ -1,6 +1,6 @@
 @* Project gallery. Every card is a working application, not a stub. *@
 @inject IJSRuntime Js
-@inject FolderPicker Picker
+@inject NativeDialogs Dialogs
 
 <div class="overlay" @onclick="OnCancel">
     <div class="dialog gallery-dialog" @onclick:stopPropagation>
@@ -98,7 +98,7 @@
         while (!string.IsNullOrWhiteSpace(start) && !Directory.Exists(start))
             start = System.IO.Path.GetDirectoryName(start) ?? "";
 
-        var chosen = await Picker.PickAsync("Pilih lokasi proyek", start);
+        var chosen = await Dialogs.PickFolderAsync("Pilih lokasi proyek", start);
         if (chosen is null) return;
 
         _location = chosen;

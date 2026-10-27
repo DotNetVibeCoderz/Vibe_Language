@@ -4,6 +4,7 @@
 @inject AppState State
 @inject EditorBridge Bridge
 @inject NodeRunner Runner
+@inject CodeIntelligence Intelligence
 @inject IJSRuntime Js
 
 <div class="editor-column">
@@ -68,6 +69,9 @@
     private bool _suppressChange;
     private string? _loadedPath;
 
+    private MonacoLanguageBridge? _languageBridge;
+    private DotNetObjectReference<MonacoLanguageBridge>? _languageBridgeRef;
+
     private bool _pulsing;
     private int _caretLine = 1;
     private int _caretColumn = 1;
@@ -83,6 +87,9 @@
         // Like every other panel, this one listens for itself. Leaning on the parent's render to
         // reach it leaves the editor showing a file the rest of the app has already moved off.
         Projects.Changed += OnProjectChanged;
+
+        // Live diagnostics arrive whenever typing pauses, not only on Compile.
+        Intelligence.DiagnosticsReady += OnLiveDiagnostics;
 
         // Kernel functions read and write the editor through this bridge, so Jack can inspect
         // what the user is looking at and change it in place.
@@ -135,9 +142,21 @@
     {
         await DefineThemes();
         await Global.SetTheme(Js, MonacoTheme);
+        await RegisterLanguageServices();
 
         _ready = true;
         await LoadActiveFile();
+    }
+
+    /// <summary>
+    /// Wires Monaco's completion, hover, and signature-help providers to CSJS.LanguageService —
+    /// real C# IntelliSense from the engine behind <c>cs2js lsp</c>, run in-process.
+    /// </summary>
+    private async Task RegisterLanguageServices()
+    {
+        _languageBridge ??= new MonacoLanguageBridge(Intelligence);
+        _languageBridgeRef ??= DotNetObjectReference.Create(_languageBridge);
+        await Js.InvokeVoidAsync("csjsgen.registerLanguageServices", _languageBridgeRef);
     }
 
     /// <summary>
@@ -215,6 +234,11 @@
         _loadedPath = Projects.ActiveFile.Path;
         await ApplyLanguage(Projects.ActiveFile.Path);
         await PushToEditor(Projects.ActiveFile.Content);
+
+        // The model is reused across files, so the previous file's markers would otherwise sit
+        // on this one until its own diagnostics arrive.
+        await SetMarkers(new List<MarkerData>());
+        Intelligence.ScheduleDiagnostics();
     }
 
     /// <summary>
@@ -467,10 +491,52 @@
                     : MarkerSeverity.Warning,
                 StartLineNumber = d.Line,
                 StartColumn = d.Column,
-                EndLineNumber = d.Line,
-                EndColumn = d.Column + 20,
+                // The transpiler reports where a span ends; older diagnostics carry only a start.
+                EndLineNumber = d.EndLine > 0 ? d.EndLine : d.Line,
+                EndColumn = d.EndLine > 0 ? d.EndColumn : d.Column + 20,
             })
             .ToList();
+
+        await Global.SetModelMarkers(Js, model, "csjs", markers);
+    }
+
+    /// <summary>
+    /// Live diagnostics from CSJS.LanguageService: compiler errors and the transpiler's own, such
+    /// as CSJS0002, underlined as the code is typed. They share the Compile markers' owner, so
+    /// whichever ran last is what the margin shows.
+    /// </summary>
+    private void OnLiveDiagnostics(string path, IReadOnlyList<CSJS.LanguageService.LanguageDiagnostic> diagnostics)
+        => InvokeAsync(async () =>
+        {
+            if (!_ready || Intelligence.ActivePath != path || _loadedPath != path) return;
+
+            var markers = diagnostics
+                .Select(d => new MarkerData
+                {
+                    Message = $"{d.Code}: {d.Message}",
+                    Source = d.Source,
+                    Severity = d.Severity switch
+                    {
+                        CSJS.LanguageService.LanguageDiagnosticSeverity.Error => MarkerSeverity.Error,
+                        CSJS.LanguageService.LanguageDiagnosticSeverity.Warning => MarkerSeverity.Warning,
+                        _ => MarkerSeverity.Info,
+                    },
+                    StartLineNumber = d.Range.Start.Line + 1,
+                    StartColumn = d.Range.Start.Character + 1,
+                    EndLineNumber = d.Range.End.Line + 1,
+                    EndColumn = d.Range.End.Character + 1,
+                })
+                .ToList();
+
+            await SetMarkers(markers);
+        });
+
+    private async Task SetMarkers(List<MarkerData> markers)
+    {
+        if (!_ready || _editor is null) return;
+
+        var model = await _editor.GetModel();
+        if (model is null) return;
 
         await Global.SetModelMarkers(Js, model, "csjs", markers);
     }
@@ -495,5 +561,8 @@
         EditorCommands.Invoked -= OnCommand;
         State.Changed -= OnStateChanged;
         Projects.Changed -= OnProjectChanged;
+        Intelligence.DiagnosticsReady -= OnLiveDiagnostics;
+        _languageBridgeRef?.Dispose();
+        _languageBridge?.Dispose();
     }
 }

@@ -1,5 +1,21 @@
 # Getting started
 
+## The quickest way: a template
+
+```bash
+dotnet new install CSJS.Templates
+dotnet new csjs-app -n HelloWorld
+cd HelloWorld
+dotnet run                     # http://localhost:5080
+```
+
+That needs nothing but the .NET 10 SDK. The project is an ordinary `.csproj` built by
+`CSJS.Build`, so open it in Visual Studio, Rider, or VS Code and you get full IntelliSense, with
+CSJS errors in the error list. `csjs-lib`, `csjs-aspnet`, `csjs-blazor`, and `csjs-console` are
+the other starting points — see [templates](../templates).
+
+The rest of this page uses the CLI, which suits a single page with a `csjs.json` and no `.csproj`.
+
 ## Install
 
 CSJS ships as two tool packages that differ only in command name. Install whichever invocation

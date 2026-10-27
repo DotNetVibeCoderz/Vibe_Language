@@ -1,3 +1,4 @@
 .vscode/**
-node_modules/**
 *.vsix
+# node_modules is not listed: vsce packs production dependencies (vscode-languageclient)
+# and leaves dev dependencies out on its own.

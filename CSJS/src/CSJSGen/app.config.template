@@ -95,5 +95,18 @@ Working with the editor:
     <!-- dark | light -->
     <add key="App.Theme" value="dark" />
 
+    <!--
+      Workspace layout. The app writes these back as panels are toggled and dragged, so the next
+      session opens the way the last one was left. Widths are CSS pixels and are clamped on load:
+      explorer 150–480, properties 160–480, chat 280–720.
+    -->
+    <add key="Layout.ShowExplorer" value="true" />
+    <add key="Layout.ShowProperties" value="true" />
+    <add key="Layout.ShowChat" value="true" />
+    <add key="Layout.ShowLineNumbers" value="true" />
+    <add key="Layout.ExplorerWidth" value="232" />
+    <add key="Layout.PropertiesWidth" value="248" />
+    <add key="Layout.ChatWidth" value="400" />
+
   </appSettings>
 </configuration>

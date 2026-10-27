@@ -3,11 +3,14 @@
     <Project Path="playground/CSJS.Playground.csproj" />
   </Folder>
   <Folder Name="/src/">
+    <Project Path="src/CSJS.Build/CSJS.Build.csproj" />
     <Project Path="src/CSJS.Cli.Standalone/CSJS.Cli.Standalone.csproj" />
     <Project Path="src/CSJS.Cli/CSJS.Cli.csproj" />
     <Project Path="src/CSJS.Core/CSJS.Core.csproj" />
     <Project Path="src/CSJS.Interop/CSJS.Interop.csproj" />
+    <Project Path="src/CSJS.LanguageService/CSJS.LanguageService.csproj" />
     <Project Path="src/CSJS.Testing/CSJS.Testing.csproj" />
+    <Project Path="src/CSJS.Templates/CSJS.Templates.csproj" />
     <Project Path="src/CSJSGen/CSJSGen.csproj" />
   </Folder>
   <Folder Name="/tests/">

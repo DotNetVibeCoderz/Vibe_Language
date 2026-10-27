@@ -163,7 +163,7 @@ public class ModernCSharpTests
             }
             """);
 
-        Assert.Equal("true\n3", output);
+        Assert.Equal("True\n3", output);
     }
 
     [Fact]

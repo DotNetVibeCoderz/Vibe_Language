@@ -161,10 +161,14 @@ jobs:
             echo "args=--version-suffix ci.$GITHUB_RUN_NUMBER" >> "$GITHUB_OUTPUT"
           fi
 
+      # CSJS.Build packs a published copy of the CLI under tools/, and CSJS.Templates stamps its
+      # own version into every template's CSJS.Build reference — so all seven must share one
+      # version, which is why they are packed in one step with the same arguments.
       - name: Pack
         working-directory: ${{ steps.locate.outputs.dir }}
         run: |
-          for p in src/CSJS.Core src/CSJS.Interop src/CSJS.Testing src/CSJS.Cli src/CSJS.Cli.Standalone; do
+          for p in src/CSJS.Core src/CSJS.Interop src/CSJS.Testing src/CSJS.Cli src/CSJS.Cli.Standalone \
+                   src/CSJS.Build src/CSJS.Templates; do
             dotnet pack "$p" -c Release ${{ steps.version.outputs.args }}
           done
 
@@ -173,6 +177,42 @@ jobs:
         with:
           name: nupkg
           path: ${{ steps.locate.outputs.dir }}/artifacts/nupkg/*.*nupkg
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------------------
+  # The VS Code extension, packaged as a .vsix artifact. Its language client is an npm
+  # dependency, so packaging also checks that the dependency is actually inside the package —
+  # an extension without it installs fine and then fails to activate.
+  # ---------------------------------------------------------------------------------------
+  vsix:
+    name: Package the VS Code extension
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Locate CSJS
+        id: locate
+        run: |
+          if [ -f CSJS.slnx ]; then echo "dir=." >> "$GITHUB_OUTPUT"
+          elif [ -f CSJS/CSJS.slnx ]; then echo "dir=CSJS" >> "$GITHUB_OUTPUT"
+          else echo "::error::CSJS.slnx not found"; exit 1; fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Package
+        working-directory: ${{ steps.locate.outputs.dir }}/vscode-extension
+        run: |
+          npm install --no-audit --no-fund
+          npx --yes @vscode/vsce@3 package -o csjs.vsix
+          unzip -l csjs.vsix | grep -q "node_modules/vscode-languageclient/package.json" \
+            || { echo "::error::vscode-languageclient is missing from the .vsix"; exit 1; }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vsix
+          path: ${{ steps.locate.outputs.dir }}/vscode-extension/csjs.vsix
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------------------
@@ -229,13 +269,81 @@ jobs:
           cs2js run .
 
   # ---------------------------------------------------------------------------------------
+  # Do the templates work as shipped? Install CSJS.Templates from the packed artifact, create a
+  # project from each template, and build it against CSJS.Build from the same artifact — no
+  # global tool, exactly as a user would. The library template's own test then runs the output.
+  # ---------------------------------------------------------------------------------------
+  templates:
+    name: Smoke test the templates
+    runs-on: ubuntu-latest
+    needs: pack
+    steps:
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: nupkg
+          path: nupkg
+
+      - name: Install the templates
+        run: |
+          pkg=$(ls nupkg/CSJS.Templates.*.nupkg | head -1)
+          dotnet new install "$pkg"
+
+          # The templates reference CSJS.Build at this exact version, which only exists here.
+          cat > nuget.config <<EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="artifact" value="$PWD/nupkg" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+            </packageSources>
+          </configuration>
+          EOF
+
+      - name: Create and build every template
+        run: |
+          set -e
+          for t in csjs-lib csjs-app csjs-aspnet csjs-blazor; do
+            name="Smoke${t#csjs-}"
+            dotnet new "$t" -n "$name"
+            dotnet build "$name" -c Release
+          done
+
+          test -f Smokeapp/wwwroot/js/App.js
+          test -f Smokeaspnet/wwwroot/js/App.js
+          test -f Smokeblazor/wwwroot/js/Sparkline.js
+
+      - name: Run the library template's tests on Node
+        working-directory: Smokelib
+        run: node test.mjs
+
+      # A CSJS diagnostic must fail the build as an ordinary MSBuild error, with a file and line,
+      # which is what puts it in the IDE's error list.
+      - name: Unmapped members fail the build with a located error
+        run: |
+          printf '\npublic static class Broken { public static void Beep() => System.Console.Beep(); }\n' >> Smokeapp/App.cs
+          if dotnet build Smokeapp -c Release > build.log 2>&1; then
+            echo "::error::An unmapped member did not fail the build"
+            exit 1
+          fi
+          grep -E "App.cs\([0-9]+,[0-9]+\): error CSJS0002" build.log
+
+  # ---------------------------------------------------------------------------------------
   # Publishing happens only for a tag, and only through an environment, so it can be gated on
   # a human approval. A version on nuget.org can never be deleted, only unlisted.
   # ---------------------------------------------------------------------------------------
   publish:
     name: Publish to NuGet
     runs-on: ubuntu-latest
-    needs: [test, windows, pack, smoke]
+    needs: [test, windows, pack, smoke, templates]
     if: startsWith(github.ref, 'refs/tags/v')
     environment: nuget
     permissions:
@@ -250,12 +358,16 @@ jobs:
         with:
           dotnet-version: "10.0.x"
 
+      # NUGET_API_KEY is a repository secret; a secret of the same name on the `nuget`
+      # environment would take precedence, which is how a reviewer-gated key can be swapped in.
+      # Pushing a .nupkg also pushes its .snupkg beside it to the symbol server.
       - name: Push
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
         run: |
           if [ -z "$NUGET_API_KEY" ]; then
-            echo "::error::NUGET_API_KEY is not set on the nuget environment"
+            echo "::error::NUGET_API_KEY is not set (repository or nuget environment secret)"
             exit 1
           fi
+          ls -1 nupkg/*.nupkg
           dotnet nuget push "nupkg/*.nupkg" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate

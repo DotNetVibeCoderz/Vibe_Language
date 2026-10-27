@@ -20,6 +20,12 @@ How CSJS is put together, and why. This is the document to read before changing 
   │ NameResolver│   Assigns JavaScript names. Flattens namespaces, disambiguates only real
   └─────────────┘   collisions, and suffixes overloads after the first.
        │
+       ▼
+  ┌─────────────┐   Whole-program facts no single file can establish: private members
+  │ ProgramAnaly│   nothing references, and non-public enums never turned into text. Both
+  │    sis      │   drive optimisations that are only sound with every tree in view.
+  └─────────────┘
+       │
        ├──────────────────────┬───────────────────────┐
        ▼                      ▼                       ▼
   ┌─────────┐          ┌────────────┐         ┌──────────────┐
@@ -54,7 +60,10 @@ disagrees with the emitted code is worse than no `.d.ts` at all.
 
 ### `MemberMap` — how BCL members become JavaScript
 
-A table of templates keyed by `Owner.Member/arity`:
+A table of templates keyed by `Owner.Member/arity`, or by an exact signature where arity is not
+enough — `IndexOf(string, int)` and `IndexOf(string, StringComparison)` share an arity and mean
+different things, so `System.String.IndexOf(string,System.StringComparison)` pins the second. The
+exact signature is tried first:
 
 ```csharp
 ["System.String.Substring/2"] = new("{this}.substring({0}, {0} + {1})"),
@@ -63,11 +72,18 @@ A table of templates keyed by `Owner.Member/arity`:
 ```
 
 Placeholders: `{this}` the receiver, `{seq}` the receiver as an array (a spread is inserted only
-when it is not already one, so chained LINQ does not stack up `[...[...x]]`), `{0}`…`{n}` the
-arguments, `{...}` all of them.
+when it is not already one, so chained LINQ does not stack up `[...[...x]]`), `{copy}` the receiver
+as a *new* array (`ToList()` never aliases in C#), `{default}` the C# default of the result type
+(`FirstOrDefault` on an empty `List<int>` is 0, not null), `{0}`…`{n}` the arguments, `{...}` all
+of them.
 
-`Helper` names a runtime function. When a template uses one, the emitter adds a **named** import
-for it — individually, so a bundler drops the helpers a program never calls.
+Every `csjs*` function a pattern calls gets a **named** import — individually, so a bundler drops
+the helpers a program never calls. `StringifyArguments` marks members like `Console.WriteLine`
+whose arguments C# converts to text by its own rules.
+
+Because a mistyped key fails silently — it simply never matches — `DepthTests` resolves every key
+against the real framework, and checks that every helper a pattern calls is exported by the
+runtime. Both tests found real dead keys the day they were written.
 
 **Anything absent from this table is an error, not a guess.** `MemberMap.RequiresMapping` decides
 whether a symbol comes from the framework; if it does and has no entry, the emitter reports
@@ -98,6 +114,14 @@ a deliberate decision rather than an accident:
 | interfaces | no runtime witness | erased from JavaScript, preserved in `.d.ts`; `is IFoo` warns |
 | `null!` | a compile-time assertion | emitted as the operand alone |
 | static ctor | C# runs it lazily | runs at module evaluation, which is deterministic |
+| `struct` assignment | copies; JavaScript shares | `$clone()` wherever C# copies; `$default()` for `default(S)` |
+| `ref` / `out` | no by-reference parameters | extra tuple elements in the result, written back at the call site |
+| `checked` / casts | JavaScript never overflows | `csjsChecked` throws; `unchecked` and narrowing casts wrap (bitwise or, `Math.imul`) |
+| `char` | a one-character string | promoted to `charCodeAt(0)` where C# promotes it to a number |
+| text conversion | `true`, enum ordinals, `null` | `True`, member names, nothing — at interpolation, `+`, and `Console` |
+| `a?.Mapped()` | no such member on the object | receiver becomes a lambda parameter; the member is applied to it |
+| declaration order | class bindings have a TDZ | enums and structs first, base classes before subclasses |
+| subfolders | `./X.js` only works side by side | imports are paths relative to the importing module |
 
 ---
 
@@ -120,6 +144,89 @@ helpers or modules are needed until it has seen the code. The import block is th
 
 Getting this wrong is silent: the map stays syntactically valid and every breakpoint lands a few
 lines off.
+
+---
+
+## Incremental compilation
+
+`TranspileSession` (`TranspileSession.cs`) is a transpiler that remembers. `watch` and `serve`
+keep one alive; the CLI's one-shot `build` relies on the cache stamp instead (see
+[CLI](cli.md#incremental-builds)), because a new process has nothing to remember.
+
+It is a layer over the one pipeline, not a second pipeline. `Transpiler` exposes an internal
+`TranspileHooks` seam with three optional callbacks, and does exactly what it always did when
+they are absent:
+
+```
+  Transpile(documents)
+       │  references ◄───────── Hooks.References     the framework set, loaded once per session
+       ▼
+  CSharpCompilation.Create
+       │  compilation ◄──────── Hooks.Compilation    previous compilation + ReplaceSyntaxTree
+       ▼                                             for the files whose text changed
+  diagnostics, NameResolver, ProgramAnalysis         always over the whole program
+       │
+       ▼  for each file
+  EmitModule ◄────────────────── Hooks.ReuseModule   the previous module, when provably unchanged
+```
+
+**When reuse is sound.** A module's JavaScript depends on more than its own text: on the names
+the `NameResolver` gives other files' types and overloads, on which file declares which type,
+and on the whole-program `ProgramAnalysis`. So a module is reused only when all three hold:
+
+1. its own text is identical;
+2. the **declared surface** of the whole program is identical — every file's tokens, trivia
+   dropped, with method and accessor bodies replaced by a marker that keeps only whether a body
+   exists (an auto-property and a computed one emit differently). Field initialisers, constants,
+   attributes, usings, and default parameter values all stay in. Partial types stay in *whole*,
+   bodies included, because their parts are emitted from different files;
+3. the analysis facts that apply to it are identical: the set of inlined enums (a body in one
+   file that interpolates an enum stops it being inlined in another) and the unused private
+   members it declares.
+
+Anything else re-emits — the whole program, when the surface changed. The rule errs towards
+rebuilding: the cost of being wrong is a slower rebuild, never stale output. The tests check every
+incremental result against a cold transpile of the same sources, byte for byte.
+
+Diagnostics are never cached from Roslyn: the whole compilation is checked on every run, and the
+emitter's own diagnostics for a reused module are replayed from when it was emitted. A failed
+build caches nothing, so the modules of the last good build stay valid for when the error is
+fixed.
+
+If `ProgramAnalysis` gains a new body-dependent fact, it has to join the reuse key in
+`TranspileSession` — otherwise a body edit in one file could leave another file's module stale.
+
+---
+
+## Bundling
+
+`Bundling/` turns the modules of one transpile into a single ES module. It can be a rearranging
+step rather than a real bundler because the emitter's output is regular: every top-level name is
+already unique across the program, imports between modules name exactly what they bind, and the
+runtime is a flat list of declarations.
+
+- **`JsTokenizer`** is just precise enough to rewrite JavaScript safely: strings, template
+  literals with nested `${}` (tokenized recursively to find their end), regex literals (decided
+  from the previous significant token, as every hand-written lexer does), and comments. It also
+  records whether a line break preceded each token, which is what automatic semicolon insertion
+  keys on.
+- **`Bundler`** parses each module's top-level imports and declarations, orders modules as ES
+  module evaluation would (depth first, imports in written order), blanks out local imports,
+  hoists and merges the external ones, and appends each module line for line. Because lines are
+  carried whole, each module's map is copied across with only a line offset — the merged map is a
+  plain v3 map, not an index map with `sections`, which every consumer understands.
+- **`RuntimeLibrary`** splits `csjs-runtime.js` into its top-level declarations, exported or not,
+  and records which other declarations each one mentions. A bundle carries the closure of what
+  the modules reference, with `export` removed. A bare top-level statement in the runtime is
+  rejected rather than guessed about, since dropping it could drop a side effect.
+- **`JsMinifier`** removes comments, indentation, and unnecessary spaces, keeping one line break
+  wherever the source had one. It records where every token moved, and the bundler rewrites the
+  merged map through that table, so a minified bundle still maps to the C# line.
+- **`SourceMapDocument`** decodes v3 maps, for merging and for the tests that check a bundle line
+  really lands on the C# line it claims.
+
+The regex-or-division heuristic treats a `/` after `)` as division. The emitter never writes a
+regex literal there; hand-written JavaScript in a `[JsBody]` that does would need parentheses.
 
 ---
 
@@ -150,6 +257,32 @@ capability means adding a function — the chat loop never changes.
 
 ---
 
+## Lowering — `JsEmitter.Lowering.cs`
+
+The emitter is partial across four files: declarations, statements, expressions, and lowering.
+The fourth holds the constructs that need a rewrite rather than a translation: struct copies,
+LINQ query syntax with transparent identifiers, the `Enum` and `JsonSerializer` APIs (which need a
+type's names or shape at runtime, written out at compile time), the C# 14 `field` keyword,
+extension members, and null-conditional assignment.
+
+A rewritten `a?.M()` needs its receiver as a parameter. Rather than thread a second code path
+through every template and extension call, `EmitContext.CreateStandIn` makes a synthetic
+identifier that the emitter writes as the parameter name, while `TypeFor` and `SymbolFor` answer
+for the expression it replaced — so every existing path that takes a receiver works unchanged.
+
+---
+
+## MSBuild integration — `CSJS.Build`
+
+A `.csproj` that references `CSJS.Build` transpiles after `CoreCompile`. The package carries the
+published CLI under `tools/` and runs `cs2js compile` out of process: Visual Studio hosts MSBuild
+on .NET Framework with its own Roslyn, and CSJS needs .NET 10 and Roslyn 5. Diagnostics are
+printed in MSBuild's canonical form with absolute paths, which is the whole of the IDE
+integration — the error list, the squiggles, and go-to-error come from the IDE's existing
+handling of build output. IntelliSense comes from the project being real C#.
+
+---
+
 ## The Playground
 
 The same `CSJS.Core` assembly, running under WebAssembly. Two constraints shaped it:
@@ -159,6 +292,9 @@ The same `CSJS.Core` assembly, running under WebAssembly. Two constraints shaped
 - **No filesystem.** Reference assemblies cannot be loaded by path, so `TranspileOptions`
   accepts `ReferenceImages` as raw bytes and the Playground downloads them from `_framework/`.
   This also means WebCIL must be disabled, since Roslyn reads PE, not WebAssembly modules.
+
+Share links put the program in the URL fragment, deflated and base64url-encoded. A fragment is
+never sent to a server, so sharing a link never uploads the code.
 
 ---
 
@@ -171,4 +307,7 @@ The same `CSJS.Core` assembly, running under WebAssembly. Two constraints shaped
 - **Semantics tests** transpile, execute the result on Node, and compare the output against what
   C# would print. These are the ones that catch a transpiler being plausible but wrong.
 
-Most behaviour worth trusting is covered by the second kind.
+Most behaviour worth trusting is covered by the second kind. `ParityTests` takes it furthest:
+whole programs run on .NET, their output captured verbatim, and the transpiled program must print
+exactly the same — a divergence anywhere in the program fails, not just in the line a narrower
+test checks.

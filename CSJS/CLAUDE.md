@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build CSJS.slnx                                    # everything; currently warning-free
-dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj  # 119 tests
+dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj  # 213 tests
 dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj --filter "FullyQualifiedName~IntegerDivisionTruncates"
 dotnet run --project src/CSJSGen                          # the desktop editor (Windows only)
 dotnet run --project playground                           # the browser playground
@@ -28,6 +28,10 @@ dotnet tool update --global --add-source ./artifacts/nupkg CSJS.Cli
 
 Node.js is required for `cs2js run`, the semantics tests, and `CSJS.Testing`.
 
+To try the templates end to end, pack everything at one version into a local folder, install
+`CSJS.Templates` from it, and build a project against that folder as a NuGet source — the
+`templates` job in `.github/workflows/csjs-ci.yml` (at the Vibe_Language root) does exactly this.
+
 ## What CSJS is
 
 A C# → JavaScript transpiler plus its ecosystem. `requirements.md` is the original spec (in
@@ -38,6 +42,9 @@ Bahasa Indonesia); `docs/architecture.md` describes what was actually built and 
 | `src/CSJS.Core` | The engine. Roslyn front end, JS emitter, `.d.ts` emitter, source maps. |
 | `src/CSJS.Interop` | Interop attributes and browser bindings. Referenced by user code. |
 | `src/CSJS.Cli` / `.Standalone` | `dotnet cs2js` and `cs2js`. Same sources, two tool command names. |
+| `src/CSJS.Build` | MSBuild package: `dotnet build` transpiles a `.csproj`. Packs the CLI under `tools/`. |
+| `src/CSJS.Templates` | `dotnet new` template pack built from `templates/`. |
+| `src/CSJS.LanguageService` | Completion/hover/diagnostics, shared by `cs2js lsp` and CSJSGen. |
 | `src/CSJS.Testing` | C# tests transpiled and run on Node. |
 | `src/CSJSGen` | Avalonia + Blazor desktop editor with the Semantic Kernel assistant. |
 | `playground` | `CSJS.Core` under WebAssembly. |
@@ -48,21 +55,27 @@ Bahasa Indonesia); `docs/architecture.md` describes what was actually built and 
 Read `docs/architecture.md` before changing the engine. The essentials:
 
 **Two tables are the contract.** `Mapping/TypeMap.cs` says how C# types cross into JavaScript;
-`Mapping/MemberMap.cs` says how BCL members do. Three consumers read them — the expression
-emitter, the `.d.ts` emitter, and the VS Code IntelliSense provider. Changing a mapping changes
-all three at once, which is the point: a `.d.ts` that disagrees with the emitted code is worse
+`Mapping/MemberMap.cs` says how BCL members do. Their consumers — the expression emitter, the
+`.d.ts` emitter, the language service's hover, and the binding generator (`TypeMap.FromTypeScript`)
+— read the same tables. Changing a mapping changes
+all of them at once, which is the point: a `.d.ts` that disagrees with the emitted code is worse
 than none.
 
 **Unmapped framework members are errors, not guesses.** `MemberMap.RequiresMapping` decides
 whether a symbol needs an entry; without one the emitter reports `CSJS0002` and the build fails.
 This is deliberate — emitting a call verbatim produces JavaScript that fails in the browser with
-no indication why. Do not "fix" a missing mapping by removing the check.
+no indication why. Do not "fix" a missing mapping by removing the check. Keys are
+`Owner.Member/arity` or an exact `Owner.Member(type,type)` signature; `DepthTests` resolves every
+key against the real framework, so a typo fails the build instead of never matching. Arity counts
+optional parameters (`CountBy` is `/2`).
 
 **Everything resolves through the semantic model.** Overload resolution, whether a division is
 integral, whether a type is user-declared or BCL — none of these are decidable from syntax.
 
-**The emitter is partial across three files.** `JsEmitter.cs` (declarations),
-`JsEmitter.Statements.cs`, `JsEmitter.Expressions.cs`.
+**The emitter is partial across four files.** `JsEmitter.cs` (declarations),
+`JsEmitter.Statements.cs`, `JsEmitter.Expressions.cs`, and `JsEmitter.Lowering.cs` (struct copies,
+query syntax, Enum/JSON APIs, C# 14 extension members). `Emit/ProgramAnalysis.cs` runs once over
+every tree first — unused-private-member removal and enum inlining depend on it.
 
 **Imports are collected during the walk and prepended afterwards**, so the source map must shift
 down with them — that is what `SourceMapBuilder.PrependLines` is for. Getting this wrong is
@@ -80,9 +93,13 @@ Two kinds, catching different failures:
   no stacked spreads in LINQ chains, public types exported.
 - **Semantics tests** (`SemanticsTests.cs`) transpile, run the result on Node, and compare
   against what C# prints. These catch a transpiler being plausible but wrong.
+- **Parity tests** (`ParityTests.cs`) run whole programs whose expected output was captured from
+  real .NET, not written by hand. Expectations written by hand once encoded `true` where C#
+  prints `True`.
 
 When adding engine behaviour, add a semantics test. `Js.Run(...)` in `TranspileHarness.cs` does
-the transpile-and-execute round trip.
+the transpile-and-execute round trip. Get expected output by running the same program on .NET
+(`InvariantGlobalization`), never by reasoning about what C# "should" print.
 
 ## CSJSGen notes
 
@@ -141,6 +158,11 @@ Two WebAssembly constraints, both already solved — do not undo them:
 - `<WasmEnableWebcil>false</WasmEnableWebcil>`. Roslyn reads PE files; WebCIL wraps assemblies
   as WebAssembly modules. `ReferenceLoader` downloads them and passes them as
   `TranspileOptions.ReferenceImages`.
+
+If the page hangs on "Memuat transpiler…" with *Failed to fetch dynamically imported module
+dotnet.js*, the static-asset manifest points at a fingerprint that is no longer in the output —
+usually after overlapping builds. Delete `playground/bin` and `playground/obj` and rebuild; it is
+not a code problem.
 
 ## Conventions
 

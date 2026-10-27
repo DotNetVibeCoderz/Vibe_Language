@@ -2,10 +2,10 @@
 
 Development status. Roadmap lives in [Plan.md](Plan.md).
 
-**Last updated:** 6 August 2026
-**Version:** 0.1.0
+**Last updated:** 27 October 2026
+**Version:** 0.2.0
 **Build:** `dotnet build CSJS.slnx` — succeeds, no warnings
-**Tests:** 120 passing, 0 failing
+**Tests:** 213 passing, 0 failing
 
 ---
 
@@ -25,8 +25,8 @@ compared — not read and judged to look right.
 | `.d.ts` emitter | Done | 8 declaration tests |
 | Source maps (v3, base64 VLQ) | Done | 3 source-map tests |
 | `TypeMap` — shared type table | Done | read by all three emitters |
-| `MemberMap` — BCL mappings | Done | 216 entries |
-| Runtime helpers | Done | 37 tree-shakeable named exports |
+| `MemberMap` — BCL mappings | Done | 554 entries (Phase 2) |
+| Runtime helpers | Done | 109 tree-shakeable named exports (Phase 2) |
 | Multi-file, cross-module imports | Done | 3 multi-module tests |
 
 The semantics tests are the ones that matter: each transpiles C#, runs the result on Node, and
@@ -175,20 +175,88 @@ status bar, and every generated file header.
 
 ---
 
+## Phase 2 — Depth: complete except CSJSGen on Linux/macOS
+
+### Engine — verified against .NET's own output
+
+`ParityTests` runs six whole programs that were first run on .NET (invariant culture), with their
+output captured verbatim; the transpiled programs must print exactly the same, and do. Between
+them they compare 101 lines of output, covering every item below.
+
+| Item | State | Verified by |
+| --- | --- | --- |
+| Struct value semantics (`$clone`, `$default`, field `Equals`) | Done | parity; `.d.ts` test |
+| BCL map: 216 → 554 entries, exact-signature keys | Done | parity (54-line framework program); every key resolved against the real framework |
+| `ref`/`out` on user methods and local functions | Done | parity; `.d.ts` tuple test |
+| LINQ query syntax: `join`, `join … into`, `let`, `from … from`, `orderby a, b`, `group … into` | Done | parity |
+| `checked`/`unchecked`, narrowing casts, `CheckForOverflowUnderflow` | Done | parity; option test |
+| C# 14: `field`, extension members, null-conditional assignment, span conversions | Done | parity |
+| `?.` before mapped members, extensions, and dictionary indexes | Done | parity |
+| Extension methods on binding types | Done | emission test |
+| Modules in subfolders import by relative path | Done | multi-folder program run on Node |
+| Unused private member removal, enum inlining | Done | emission tests |
+| Roslyn 4.14 → 5.0 | Done | full suite; Playground boots under WebAssembly |
+
+Writing the parity tests also showed that six existing semantics tests had encoded a divergence
+— they expected `true` where C# prints `True`. Their expectations are corrected; the lesson is now
+in `CLAUDE.md`: take expected output from .NET, never from reasoning.
+
+### Output and tooling
+
+| Item | State | Verified by |
+| --- | --- | --- |
+| `cs2js build --bundle [--minify]` | Done | bundles of all four samples run; bundle output equals module output; maps decoded back to `.cs` lines |
+| Incremental builds and watch | Done | no-op build ~9 s → ~0.4 s on 41 files; incremental output byte-identical to a full build |
+| Live reload in `serve` (CSS hot-swapped, error overlay) | Done | event stream checked with curl while files were served |
+| Source-mapped stack traces in `run` | Done | a throwing program prints `Helper.cs:12:9` |
+| `CSJS.LanguageService` + `cs2js lsp` | Done | 12 service tests; the real `cs2js lsp` process driven over stdio in a test |
+| VS Code language client | Done | packaged `.vsix` contains the client; not run inside VS Code itself |
+| Rider and Visual Studio | Done, through `CSJS.Build` | a CSJS error appears as `App.cs(106,34): error CSJS0002` from `dotnet build` |
+
+### CSJSGen
+
+| Item | State | Verified by |
+| --- | --- | --- |
+| Layout persisted to `app.config` | Done | 36-check harness, including a real config round trip |
+| Tool-call transcript in the chat | Done | fake-function harness; live Azure OpenAI `gpt-5-mini` run recorded `Csjs.read_editor` and `Csjs.compile` |
+| Native dialogs: open file, save-as, attachments | Done | built; not clicked through interactively |
+| Semantic completion, hover, live diagnostics in Monaco | Done | driven through WebView2 DevTools: `Document.` completions and a live `CSJS0002` marker |
+| Linux and macOS | **Open** | not attempted — cannot be run here |
+
+### Distribution
+
+| Item | State | Verified by |
+| --- | --- | --- |
+| `CSJS.Build` | Done | template builds below; `dotnet run` served the app (HTTP 200 for page and module) |
+| `CSJS.Templates` (5 templates) | Done | packed, installed in an isolated hive, a project created and built from each against the packed `CSJS.Build`; `csjs-lib`'s Node tests pass |
+| Package icon | Done | in every `.nupkg` and the `.vsix` |
+| CI: `vsix` and `templates` jobs; publish via `NUGET_API_KEY` | Done | workflow parsed; the same steps run locally |
+
+## Phase 3 — Ecosystem: complete
+
+| Item | State | Verified by |
+| --- | --- | --- |
+| Binding generator, `cs2js bind` | Done | 38 tests: generated C# compiled and transpiled, run on Node against JS matching the `.d.ts` |
+| `cs2js add <npm-package>` | Done | run against react, vue, @angular/core, @angular/platform-browser |
+| React, Vue, Angular bindings | Shipped in `bindings/` | components compiled and run against the real packages under jsdom |
+| Playground share links | Done | a link encoded by an independent (Python) encoder opened and transpiled in the WebAssembly Playground; a link from the Share button decoded back byte-identically |
+
+---
+
 ## By the numbers
 
 | | |
 | --- | --- |
-| Projects | 8 |
-| Source files | 86 |
-| Lines of code | ~20,100 |
-| Tests | 120, all passing |
-| BCL member mappings | 216 |
-| Runtime helpers | 37 |
+| Projects | 11 |
+| Source files | 117 (plus 4 generated framework binding files) |
+| Lines of code | ~39,100 (plus ~43,000 generated bindings) |
+| Tests | 213, all passing |
+| BCL member mappings | 554, plus generated `MathF` and integral-type entries |
+| Runtime helpers | 109 |
 | Kernel functions | 18 |
-| Project templates | 21 |
+| Project templates | 21 in CSJSGen, 5 in `CSJS.Templates` |
 | Prompt templates | 24 |
-| NuGet packages | 5 |
+| NuGet packages | 7 |
 
 ---
 
@@ -198,42 +266,34 @@ Recorded honestly; each is on the roadmap.
 
 **Engine**
 
-- Structs are emitted as classes, so assignment shares rather than copies. This is a real
-  divergence from C# and is not currently reported — the most significant known gap.
-- `ref`/`out` on your own methods is rejected rather than rewritten. Return a tuple.
-- `join`, `let`, and `group … into` in LINQ query syntax are unsupported. Method syntax works.
-- `checked` arithmetic does not reproduce C# overflow behaviour.
-- BCL coverage is broad but not complete. Anything missing is a build error, not silent
-  breakage — but it is still something you have to work around.
+- Arithmetic outside `checked`/`unchecked` is not wrapped to 32 bits; doubles hold every result
+  exactly, and wrapping every addition would bury the output. `unchecked` and
+  `CheckForOverflowUnderflow` give the C# behaviour where it matters.
+- Integer division by zero yields `Infinity` rather than throwing `DivideByZeroException`.
+- Number and date formatting follow the invariant culture.
+- BCL coverage is broad but not complete. Anything missing is a build error, not silent breakage.
 
 **Tooling**
 
-- The CLI recompiles everything on each build; there is no incremental path yet.
-- The VS Code extension covers the CSJS layer only. Full C# IntelliSense needs the C# extension
-  alongside it, and properly wants an LSP.
-- `cs2js serve` has no hot reload.
+- Live reload reloads the page for code changes; only CSS is swapped in place.
+- `cs2js serve` does not yet inject the import map `cs2js add` prints, so a page that imports an
+  npm package by bare name needs the bundle or its own import map.
+- The language server re-transpiles the whole project on each pause in typing.
 
 **CSJSGen**
 
 - Windows only — the BlazorWebView host is.
-- File dialogs are typed paths rather than native pickers.
-- Tool calls are not shown in the transcript, so Jack's compile and run steps are invisible even
-  though they happen.
-- Monaco gives colouring and structure but not semantic IntelliSense; that needs a language
-  server, which is the LSP item on the roadmap.
-- Panel widths reset between sessions — they live in memory rather than `app.config`.
 
 ---
 
 ## Next up
 
-From [Plan.md](Plan.md), in the order that removes the most friction:
+From [Plan.md](Plan.md):
 
-1. Broaden the BCL map — the most commonly hit limitation.
-2. `ref`/`out` rewrite to tuples.
-3. Struct value semantics, or a diagnostic if not.
-4. A language server, so IntelliSense is semantic rather than syntactic.
-5. Incremental compilation.
+1. CSJSGen on Linux and macOS.
+2. Import maps in `cs2js serve`.
+3. Module hot-swapping that keeps page state.
+4. Culture-aware formatting.
 
 ---
 

@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    A browser app written in C#.
+
+    `dotnet build` compiles the C# (so the IDE checks it like any other project), then CSJS.Build
+    transpiles it to wwwroot/js. `dotnet run` serves wwwroot on http://localhost:5080.
+    Gravicode Studios — led by Kang Fadhil.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CsjsApp</RootNamespace>
+
+    <!-- Where the JavaScript goes, and the folder `dotnet run` serves. -->
+    <CsjsOutputPath>wwwroot/js/</CsjsOutputPath>
+    <CsjsWebRoot>$(MSBuildProjectDirectory)/wwwroot/</CsjsWebRoot>
+    <CsjsHostPort>5080</CsjsHostPort>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CSJS.Build" Version="0.2.0" />
+  </ItemGroup>
+
+</Project>

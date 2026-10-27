@@ -203,8 +203,23 @@ numbers.Where(n => n % 2 == 0).OrderBy(n => n).ToList()
 
 Because a `List<T>` is already an `Array`, chains do not accumulate spreads.
 
-Query syntax is lowered onto the same operations. `join` and `let` are not supported — rewrite
-those in method syntax.
+Query syntax is lowered onto the same operations, all of it: `from … from`, `where`, `let`,
+`join`, `join … into`, `orderby` with several keys, `group … by`, and `into` continuations. Once
+more than one range variable is in scope, each element becomes an object carrying all of them and
+every lambda destructures it — the C# compiler's transparent identifiers, made visible:
+
+```csharp
+from p in people
+join d in depts on p.Dept equals d.Id
+let upper = p.Name.ToUpper()
+orderby d.Title descending, upper
+select $"{upper}@{d.Title}"
+// csjsThenBy(csjsOrderBy(csjsInnerJoin(people, depts, (p) => p.Dept, (d) => d.Id,
+//   (p, d) => ({ p, d })).map(({ p, d }) => ({ p, d, upper: p.Name.toUpperCase() })), …), …)
+```
+
+`ThenBy` refines the ordering `OrderBy` established instead of replacing it, join and group keys
+compare with C# equality (so `new { a, b }` keys work), and `ToList()` always copies.
 
 ### `foreach` over a dictionary
 
@@ -216,46 +231,105 @@ foreach (var entry in scores)
     Console.WriteLine($"{entry.Key} = {entry.Value}");
 ```
 
-### `out` parameters on BCL methods
+### `ref` and `out`
 
-The Try* pattern is common enough that refusing it would make ordinary code untranspilable, so
-it is rewritten into an assignment expression:
+On BCL methods, the Try* pattern is rewritten into an assignment expression:
 
 ```csharp
 if (scores.TryGetValue("ana", out var score)) { … }
 // if (((score = scores.get('ana')) !== undefined)) { … }
 ```
 
-`int.TryParse` and `double.TryParse` work the same way.
+On your own methods and local functions, by-reference parameters come back in the result: every
+`return x` becomes `return [x, a, b]`, and the call site writes the extra elements back into the
+variables it passed. That is exactly what the caller observes in C#.
 
-### String interpolation
+```csharp
+static bool TryHalve(int n, out int half) { … }
+if (TryHalve(10, out var h)) …
+// static TryHalve(n) { let half; … return [true, half]; }
+// if ((($r0) => (h = $r0[1], $r0[0]))(Program.TryHalve(10))) …
+```
 
-Becomes a template literal. Format specifiers route through a runtime helper:
+The `.d.ts` says the same: `TryHalve(n: number): [boolean, number]`.
+
+### Structs
+
+A struct is a class whose copies are made explicitly. Each gets `$clone()` and a static
+`$default()`, and a struct read from a variable, field, property, or element is cloned wherever
+C# would copy it — assignment, argument passing, `return`, collection initialisers. `default(S)`,
+`new S()` without a constructor of its own, an unassigned field, and every slot of `new S[n]` are
+zeroed instances, never null. `Equals` compares field by field, as `ValueType.Equals` does.
+A `readonly struct` cannot change, so it is shared rather than copied.
+
+### Integer overflow and narrowing
+
+`checked` throws `OverflowException` when a result leaves its type's range; `unchecked` wraps
+(`int.MaxValue + 1` is `int.MinValue`, multiplication via `Math.imul`). An explicit narrowing cast
+always wraps — `(byte)300` is 44 — or throws under `checked`. Outside either context, arithmetic
+is written as it reads; `<CheckForOverflowUnderflow>` (or `TranspileOptions.CheckOverflow`)
+makes `checked` the default, as it does for the C# compiler.
+
+### `char`
+
+A char is a one-character string, promoted to its UTF-16 code wherever C# promotes it:
+`c - '0'` is `c.charCodeAt(0) - 48`, `(char)(c + 1)` is `String.fromCharCode(…)`.
+
+### Conditional access
+
+`a?.B` stays JavaScript's `?.` when `B` exists on the JavaScript object. When it does not — a
+mapped BCL member, an extension method, a dictionary index — the receiver becomes a parameter, so
+it is evaluated once and the result is C#'s `null`:
+
+```csharp
+list?.Where(x => x > 1).Count()
+// (($r0) => $r0 == null ? null : $r0.filter((x) => x > 1).length)(list)
+```
+
+### C# 14
+
+- `field` in an accessor names the property's synthesised storage.
+- Extension members (`extension(string s) { … }`) become the static methods the compiler lowers
+  them to; `"hi".Shout()` calls `StringExtensions.Shout('hi')` and an extension property reads
+  through `get_IsBlank(s)`.
+- Null-conditional assignment (`node?.Value = 5`) assigns only when the receiver is not null.
+- First-class spans: `array.Contains(x)` binds to `MemoryExtensions` and is mapped accordingly.
+
+### Text conversion
+
+Wherever C# turns a value into text — interpolation, `+` with a string, `Console.WriteLine`,
+`string.Join` — the C# rules apply: an enum prints its name (or `Light, Dim` for flags, or the
+number when no member matches), a `bool` prints `True`, `null` prints nothing, and an object goes
+through its `ToString()`.
 
 ```csharp
 $"{value:F2}"     // csjsFormatValue(value, 'F2')
-$"{level}"        // Level[level]  — enums print their name
+$"{level}"        // csjsEnumName(Level, level)
 ```
+
+Standard and custom numeric formats (`N2`, `P1`, `X`, `0.00`, `#,##0`) and date formats
+(`yyyy-MM-dd HH:mm`) follow the invariant culture. `Math.Round` rounds half to even.
+
+### Framework coverage
+
+Beyond strings, math, and collections: `Regex` (with .NET group numbering and substitutions),
+`TimeSpan` (a number of milliseconds), `DateTime` arithmetic and formats, `System.Text.Json`
+(`Deserialize<T>` builds real class instances, Maps, and Dates from a type description the
+transpiler writes), `Stack<T>`/`Queue<T>`, the `HashSet<T>` set operations, the full LINQ surface
+including `Zip`, `Aggregate`, `Chunk`, `MinBy`, `DistinctBy`, and the `Enum` APIs. Every key in
+the mapping table is checked against the real framework by a test.
+
+### Whole-program optimisation
+
+Private members nothing references are left out (unless their initialiser might have side
+effects), and a non-public enum that is never turned into text is inlined as numbers with no
+runtime object — `3 /* Direction.West */`.
 
 ---
 
 ## Not supported
 
 These are reported as errors rather than mistranslated.
-
-### `ref` and `out` on your own methods
-
-JavaScript has no by-reference parameters, so the write-back would be silently lost. Return a
-tuple instead:
-
-```csharp
-// Rejected
-private static void Swap(ref int a, ref int b) { … }
-
-// Use instead
-private static (int, int) Swap(int a, int b) => (b, a);
-var (x, y) = Swap(x, y);
-```
 
 ### Pointers and `unsafe`
 

@@ -1,4 +1,5 @@
-@* One message. Assistant replies render as Markdown; user messages stay plain. *@
+@* One message. Assistant replies render as Markdown, with the tool calls Jack made placed
+   where they happened in the text; user messages stay plain. *@
 @inject MarkdownRenderer Markdown
 
 <div class="message @RoleClass">
@@ -10,7 +11,23 @@
     <div class="message-body">
         @if (Message.Role == ChatRole.Assistant)
         {
-            @Markdown.ToHtml(Message.Content)
+            @foreach (var segment in Segments())
+            {
+                @if (segment.Text.Trim().Length > 0)
+                {
+                    @Markdown.ToHtml(segment.Text)
+                }
+
+                @if (segment.Calls.Count > 0)
+                {
+                    <div class="tool-calls">
+                        @foreach (var call in segment.Calls)
+                        {
+                            <ToolCallItem @key="call.Id" Call="call" />
+                        }
+                    </div>
+                }
+            }
 
             @if (Message.IsStreaming)
             {
@@ -83,4 +100,27 @@
     /// worth applying, so the button never appears on a plain prose answer.
     /// </summary>
     private string? CodeToApply => MarkdownRenderer.FirstCsjsBlock(Message.Content);
+
+    private sealed record Segment(string Text, List<ToolCall> Calls);
+
+    /// <summary>
+    /// Splits the reply at the points where tool calls were made. Calls happen between model
+    /// turns, so each split falls between whole stretches of Markdown rather than inside one.
+    /// </summary>
+    private List<Segment> Segments()
+    {
+        var content = Message.Content;
+        var calls = Message.SnapshotToolCalls();
+        var segments = new List<Segment>();
+        var start = 0;
+
+        foreach (var group in calls.GroupBy(c => Math.Clamp(c.Offset, 0, content.Length)).OrderBy(g => g.Key))
+        {
+            segments.Add(new Segment(content[start..group.Key], group.ToList()));
+            start = group.Key;
+        }
+
+        segments.Add(new Segment(content[start..], new List<ToolCall>()));
+        return segments;
+    }
 }

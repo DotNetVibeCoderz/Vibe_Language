@@ -114,7 +114,7 @@ public class SemanticsTests
             }
             """));
 
-        Assert.Equal("2\n30\nTrue\nana=30\nbudi=25".Replace("True", "true"), output);
+        Assert.Equal("2\n30\nTrue\nana=30\nbudi=25", output);
     }
 
     [Fact]
@@ -153,7 +153,7 @@ public class SemanticsTests
             Console.WriteLine(string.Join(",", numbers.Take(2)));
             """));
 
-        Assert.Equal("2,8\n28\n9\ntrue\n3\n5,3", output);
+        Assert.Equal("2,8\n28\n9\nTrue\n3\n5,3", output);
     }
 
     [Fact]
@@ -180,7 +180,7 @@ public class SemanticsTests
             """);
 
         // Reference equality would report false for the first comparison.
-        Assert.Equal("true\nfalse\nPoint { X = 1, Y = 2 }", output);
+        Assert.Equal("True\nFalse\nPoint { X = 1, Y = 2 }", output);
     }
 
     [Fact]
@@ -365,7 +365,7 @@ public class SemanticsTests
             }
             """);
 
-        Assert.Equal("woof\nfalse", output);
+        Assert.Equal("woof\nFalse", output);
     }
 
     [Fact]
@@ -482,7 +482,7 @@ public class SemanticsTests
             Console.WriteLine("x".PadLeft(3, '0'));
             """));
 
-        Assert.Equal("Halo Dunia\nHALO DUNIA\nDunia\nHalo\ntrue\na+b+c\ntrue\n00x", output);
+        Assert.Equal("Halo Dunia\nHALO DUNIA\nDunia\nHalo\nTrue\na+b+c\nTrue\n00x", output);
     }
 
     [Fact]

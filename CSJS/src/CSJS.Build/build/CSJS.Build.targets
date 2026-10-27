@@ -1,0 +1,84 @@
+<Project>
+
+  <!--
+    CSJS.Build: transpiles the project's C# to JavaScript after the C# compiler has checked it.
+    Gravicode Studios — led by Kang Fadhil.
+  -->
+
+  <PropertyGroup>
+    <CsjsToolPath Condition="'$(CsjsToolPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../tools/cs2js.dll'))</CsjsToolPath>
+
+    <!-- The same symbol the transpiler defines, so `#if CSJS` reads identically in the IDE. -->
+    <DefineConstants>$(DefineConstants);CSJS</DefineConstants>
+  </PropertyGroup>
+
+  <!--
+    `dotnet run` serves the web root. The project is a library — its assembly is never executed —
+    so without this `dotnet run` would refuse to start it at all.
+  -->
+  <PropertyGroup Condition="'$(OutputType)' != 'Exe' and '$(OutputType)' != 'WinExe' and '$(CsjsEnabled)' == 'true'">
+    <RunCommand>dotnet</RunCommand>
+    <RunArguments>exec &quot;$(CsjsToolPath)&quot; host &quot;$(CsjsWebRoot)&quot; --port $(CsjsHostPort)</RunArguments>
+    <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
+  </PropertyGroup>
+
+  <Target Name="CsjsTranspile"
+          AfterTargets="CoreCompile"
+          Condition="'$(CsjsEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'"
+          Inputs="@(Compile);$(MSBuildProjectFullPath);$(CsjsToolPath)"
+          Outputs="$(IntermediateOutputPath)csjs.stamp">
+
+    <PropertyGroup>
+      <_CsjsIntermediate>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(IntermediateOutputPath)'))</_CsjsIntermediate>
+      <_CsjsSourcesFile>$(IntermediateOutputPath)csjs.sources</_CsjsSourcesFile>
+      <_CsjsSupportFile>$(IntermediateOutputPath)csjs.support</_CsjsSupportFile>
+      <_CsjsFlags></_CsjsFlags>
+      <_CsjsFlags Condition="'$(CsjsTypeDefinitions)' != 'true'">$(_CsjsFlags) --no-dts</_CsjsFlags>
+      <_CsjsFlags Condition="'$(CsjsSourceMaps)' != 'true'">$(_CsjsFlags) --no-maps</_CsjsFlags>
+      <_CsjsFlags Condition="'$(CheckForOverflowUnderflow)' == 'true'">$(_CsjsFlags) --check-overflow</_CsjsFlags>
+      <_CsjsFlags Condition="'$(CsjsEntryPoint)' == 'true'">$(_CsjsFlags) --entry</_CsjsFlags>
+    </PropertyGroup>
+
+    <!--
+      Files generated under obj/ (GlobalUsings.g.cs, AssemblyInfo.cs) are compiled for their
+      declarations but never emitted: the user's code relies on the implicit usings, and an
+      assembly attribute has no JavaScript to become.
+    -->
+    <ItemGroup>
+      <_CsjsSupport Include="@(Compile)" Condition="$([System.String]::Copy('%(Compile.FullPath)').StartsWith('$(_CsjsIntermediate)', StringComparison.OrdinalIgnoreCase))" />
+      <_CsjsSource Include="@(Compile)" Exclude="@(_CsjsSupport)" />
+    </ItemGroup>
+
+    <WriteLinesToFile File="$(_CsjsSourcesFile)" Lines="@(_CsjsSource->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <WriteLinesToFile File="$(_CsjsSupportFile)" Lines="@(_CsjsSupport->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+
+    <!-- Diagnostics are printed in canonical form, so Exec turns them into build errors. -->
+    <Exec Command="dotnet exec &quot;$(CsjsToolPath)&quot; compile --project-dir &quot;$(MSBuildProjectDirectory)&quot; --out &quot;$(CsjsOutputPath)&quot; --name &quot;$(AssemblyName)&quot; --module $(CsjsModule) --source-root &quot;$(CsjsSourceRoot)&quot; --sources &quot;$(_CsjsSourcesFile)&quot; --support &quot;$(_CsjsSupportFile)&quot; --define &quot;$(DefineConstants)&quot;$(_CsjsFlags)"
+          WorkingDirectory="$(MSBuildProjectDirectory)"
+          StandardOutputImportance="normal"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="_CsjsExitCode" />
+    </Exec>
+
+    <!--
+      The diagnostics above already failed the build when there were any. This only fires when
+      the transpiler stopped without explaining why, rather than repeating "exited with code 1"
+      under every real error.
+    -->
+    <Error Condition="'$(_CsjsExitCode)' != '0'" Text="CSJS: the transpiler exited with code $(_CsjsExitCode)." />
+
+    <Touch Files="$(IntermediateOutputPath)csjs.stamp" AlwaysCreate="true" />
+
+    <ItemGroup>
+      <FileWrites Include="$(IntermediateOutputPath)csjs.stamp;$(_CsjsSourcesFile);$(_CsjsSupportFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- `dotnet build -t:CsjsClean` removes the emitted JavaScript. -->
+  <Target Name="CsjsClean" AfterTargets="Clean">
+    <RemoveDir Directories="$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(CsjsOutputPath)'))"
+               Condition="'$(CsjsCleanOutput)' == 'true'" />
+    <Delete Files="$(IntermediateOutputPath)csjs.stamp" />
+  </Target>
+
+</Project>

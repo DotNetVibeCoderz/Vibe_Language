@@ -598,22 +598,24 @@ public class DiagnosticTests
     }
 
     [Fact]
-    public void RefAndOutParametersAreRejectedNotMistranslated()
+    public void FrameworkRefAndOutParametersWithoutAMappingAreRejected()
     {
+        // A user method's ref/out parameters are rewritten (see RefOutTests); a framework one has
+        // no source to rewrite, so without a mapping it must still fail rather than lose the
+        // write-back silently.
         var result = Js.Transpile("""
+            using System.Threading;
+
             public class Sample
             {
-                private static void Swap(ref int a, ref int b) { }
-
                 public static void Run()
                 {
-                    int x = 1, y = 2;
-                    Swap(ref x, ref y);
+                    int x = 1;
+                    Interlocked.Increment(ref x);
                 }
             }
             """);
 
-        // Emitting something plausible here would silently lose the write-back.
         Assert.False(result.Success);
         Assert.Contains(result.Errors, e => e.Id == "CSJS0002");
     }

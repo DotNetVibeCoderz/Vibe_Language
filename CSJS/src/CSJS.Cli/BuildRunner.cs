@@ -4,20 +4,21 @@ using CSJS.Core;
 namespace CSJS.Cli;
 
 /// <summary>Outcome of one build, kept small so watch mode can report it repeatedly.</summary>
-public sealed record BuildReport(bool Success, int ModuleCount, int ErrorCount, int WarningCount, TimeSpan Duration);
+public sealed partial record BuildReport(bool Success, int ModuleCount, int ErrorCount, int WarningCount, TimeSpan Duration);
 
 /// <summary>Drives the transpiler over a <see cref="CsjsProject"/> and writes the results to disk.</summary>
-public sealed class BuildRunner
+public sealed partial class BuildRunner
 {
     private readonly CsjsProject _project;
     private readonly string _projectDirectory;
     private readonly bool _emitEntryPointCall;
 
-    public BuildRunner(CsjsProject project, string projectDirectory, bool emitEntryPointCall = false)
+    public BuildRunner(CsjsProject project, string projectDirectory, bool emitEntryPointCall = false, BuildSettings? settings = null)
     {
         _project = project;
         _projectDirectory = projectDirectory;
         _emitEntryPointCall = emitEntryPointCall;
+        _settings = settings ?? new BuildSettings();
     }
 
     public BuildReport Run(bool quiet = false)
@@ -57,7 +58,9 @@ public sealed class BuildRunner
         // reference for something the toolchain already carries.
         options.AdditionalReferences.Add(typeof(CSJS.Testing.Assert).Assembly.Location);
 
-        var result = new Transpiler(options).Transpile(documents);
+        if (TryUpToDate(documents, options, sourceRoot, quiet, stopwatch) is { } upToDate) return upToDate;
+
+        var result = Transpile(options, documents);
 
         foreach (var diagnostic in result.Diagnostics.OrderByDescending(d => d.Severity))
             WriteDiagnostic(diagnostic, sourceRoot);
@@ -66,11 +69,12 @@ public sealed class BuildRunner
         var warningCount = result.Warnings.Count();
 
         if (!result.Success)
-            return new BuildReport(false, 0, errorCount, warningCount, stopwatch.Elapsed);
+            return new BuildReport(false, 0, errorCount, warningCount, stopwatch.Elapsed) { Diagnostics = result.Diagnostics };
 
         Directory.CreateDirectory(outputRoot);
+        var writer = new OutputWriter();
 
-        foreach (var module in result.Modules)
+        foreach (var module in WritesModules ? result.Modules : [])
         {
             // Output mirrors the source tree so relative imports between modules stay valid.
             var relativeDirectory = Path.GetDirectoryName(module.SourcePath) ?? "";
@@ -78,25 +82,27 @@ public sealed class BuildRunner
             Directory.CreateDirectory(targetDirectory);
 
             var jsPath = Path.Combine(targetDirectory, module.FileName);
-            File.WriteAllText(jsPath, module.JavaScript);
+            writer.Write(jsPath, module.JavaScript);
 
             if (module.SourceMap is not null)
-                File.WriteAllText(jsPath + ".map", module.SourceMap);
+                writer.Write(jsPath + ".map", RootedSourceMap(module.SourceMap, targetDirectory, Path.Combine(sourceRoot, relativeDirectory)));
 
             if (module.TypeDefinitions is not null)
-                File.WriteAllText(Path.ChangeExtension(jsPath, ".d.ts"), module.TypeDefinitions);
+                writer.Write(Path.ChangeExtension(jsPath, ".d.ts"), module.TypeDefinitions);
 
             if (!quiet)
                 Console.WriteLine($"  {Path.GetRelativePath(_projectDirectory, jsPath)}");
         }
 
         // The runtime module is only written when something actually imported a helper.
-        if (result.RuntimeJavaScript is not null)
+        if (result.RuntimeJavaScript is not null && WritesModules)
         {
             var runtimePath = Path.Combine(outputRoot, "csjs-runtime.js");
-            File.WriteAllText(runtimePath, result.RuntimeJavaScript);
+            writer.Write(runtimePath, result.RuntimeJavaScript);
             if (!quiet) Console.WriteLine($"  {Path.GetRelativePath(_projectDirectory, runtimePath)}");
         }
+
+        var bundlePath = _settings.Bundle ? WriteBundle(result, outputRoot, sourceRoot, writer, quiet) : null;
 
         // The C# sources are deliberately *not* copied. Each map carries `sourcesContent`, so a
         // debugger already has the original text — shipping .csjs alongside the JavaScript would
@@ -108,6 +114,7 @@ public sealed class BuildRunner
         {
             var target = Path.Combine(outputRoot, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            writer.Track(target);
 
             // Unchanged files are skipped, which keeps watch mode from rewriting the whole tree
             // on every keystroke.
@@ -123,8 +130,17 @@ public sealed class BuildRunner
         if (assetCount > 0 && !quiet)
             Console.WriteLine($"  {assetCount} asset(s) copied.");
 
+        SaveStamp(result.Modules.Count, result.Warnings, writer);
+
         stopwatch.Stop();
-        return new BuildReport(true, result.Modules.Count, errorCount, warningCount, stopwatch.Elapsed);
+        return new BuildReport(true, result.Modules.Count, errorCount, warningCount, stopwatch.Elapsed)
+        {
+            FilesWritten = writer.Written,
+            FilesUnchanged = writer.Unchanged,
+            Diagnostics = result.Diagnostics,
+            Incremental = _settings.Force ? null : _session?.LastRun,
+            BundlePath = bundlePath,
+        };
     }
 
     private static void WriteDiagnostic(CsjsDiagnostic diagnostic, string sourceRoot)

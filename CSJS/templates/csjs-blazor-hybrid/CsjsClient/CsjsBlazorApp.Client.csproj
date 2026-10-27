@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The browser-side half of the app, written in C#.
+
+    This is an ordinary project, so the IDE gives it full IntelliSense. CSJS.Build transpiles it
+    into the web project's wwwroot/js on every build; the web project references it only to make
+    sure it builds first.
+    Gravicode Studios — led by Kang Fadhil.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>CsjsBlazorApp.Client</RootNamespace>
+    <CsjsOutputPath>../wwwroot/js/</CsjsOutputPath>
+    <CsjsSourceRoot>src</CsjsSourceRoot>
+    <!-- The web project serves the site; this one only produces JavaScript. -->
+    <CsjsWebRoot>$(MSBuildProjectDirectory)/../wwwroot/</CsjsWebRoot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CSJS.Build" Version="0.2.0" />
+  </ItemGroup>
+
+</Project>

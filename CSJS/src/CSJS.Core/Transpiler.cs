@@ -20,6 +20,9 @@ public sealed class Transpiler
 
     public Transpiler(TranspileOptions? options = null) => _options = options ?? new TranspileOptions();
 
+    /// <summary>The seam <see cref="TranspileSession"/> uses to reuse work across runs.</summary>
+    internal TranspileHooks? Hooks { get; init; }
+
     /// <summary>Transpiles a single source string. Convenience wrapper over <see cref="Transpile"/>.</summary>
     public TranspileResult TranspileSource(string csharp, string path = "Program.cs")
         => Transpile(new[] { new SourceDocument(path, csharp) });
@@ -47,7 +50,7 @@ public sealed class Transpiler
         var compilation = CSharpCompilation.Create(
             _options.AssemblyName,
             trees,
-            BuildReferences(),
+            Hooks?.References ?? BuildReferences(),
             new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
                 allowUnsafe: false,
@@ -57,6 +60,7 @@ public sealed class Transpiler
                 // handful of files, so serial binding costs almost nothing and works everywhere.
                 concurrentBuild: false,
                 metadataImportOptions: MetadataImportOptions.Public));
+        if (Hooks?.Compilation is { } reuseCompilation) compilation = reuseCompilation(compilation, trees);
 
         CollectRoslynDiagnostics(compilation, diagnostics);
         if (diagnostics.Any(d => d.Severity == DiagnosticSeverity.Error))
@@ -71,6 +75,7 @@ public sealed class Transpiler
         foreach (var type in declaredTypes) names.RegisterMembers(type);
 
         var typeModules = BuildTypeModuleMap(compilation, trees, documents);
+        var analysis = ProgramAnalysis.Analyze(compilation, trees, _options);
 
         var modules = new List<EmittedModule>();
         var anyHelperUsed = false;
@@ -79,9 +84,16 @@ public sealed class Transpiler
         {
             var tree = trees[i];
             var document = documents[i];
+            if (Hooks?.ReuseModule?.Invoke(i, analysis, diagnostics) is { } reused)
+            {
+                modules.Add(reused);
+                anyHelperUsed |= reused.JavaScript.Contains(_options.RuntimeModule, StringComparison.Ordinal);
+                continue;
+            }
+
             var model = compilation.GetSemanticModel(tree);
 
-            var module = EmitModule(tree, model, document, names, typeModules, diagnostics);
+            var module = EmitModule(tree, model, document, names, typeModules, analysis, diagnostics);
             if (module is null) continue;
 
             modules.Add(module);
@@ -102,6 +114,7 @@ public sealed class Transpiler
         SourceDocument document,
         NameResolver names,
         IReadOnlyDictionary<INamedTypeSymbol, string> typeModules,
+        ProgramAnalysis analysis,
         List<CsjsDiagnostic> diagnostics)
     {
         var sourceMap = _options.EmitSourceMap ? new SourceMapBuilder() : null;
@@ -122,6 +135,7 @@ public sealed class Transpiler
             FilePath = document.Path,
             TypeModules = typeModules,
             CurrentModule = ModuleSpecifierFor(document.Path),
+            Analysis = analysis,
         };
 
         var emitter = new JsEmitter(context);
@@ -141,7 +155,7 @@ public sealed class Transpiler
             javascript = javascript.TrimEnd() + $"\n//# sourceMappingURL={moduleName}.map\n";
 
         var typeDefinitions = _options.EmitTypeDefinitions
-            ? new DtsEmitter(model, names).Emit((CompilationUnitSyntax)tree.GetRoot(), moduleName)
+            ? new DtsEmitter(model, names, analysis).Emit((CompilationUnitSyntax)tree.GetRoot(), moduleName)
             : null;
 
         return new EmittedModule(
@@ -171,7 +185,7 @@ public sealed class Transpiler
             sb.Append("import { ")
               .Append(string.Join(", ", context.Helpers))
               .Append(" } from '")
-              .Append(_options.RuntimeModule)
+              .Append(RuntimeSpecifierFor(context.CurrentModule))
               .Append("';\n");
         }
 
@@ -200,9 +214,24 @@ public sealed class Transpiler
         return sb.ToString();
     }
 
-    /// <summary>Module specifier another file would use to import this one.</summary>
+    /// <summary>
+    /// Where a document's module sits relative to the output root, e.g. <c>Models/User.js</c>.
+    /// Output mirrors the source tree, so other modules import it by its path relative to
+    /// themselves, which <see cref="ModulePaths.Relative"/> works out. A rooted path has no source
+    /// root to be relative to, so it is placed at the top.
+    /// </summary>
     private static string ModuleSpecifierFor(string path)
-        => "./" + Path.ChangeExtension(Path.GetFileName(path), ".js");
+        => ModulePaths.Normalize(Path.ChangeExtension(Path.IsPathRooted(path) ? Path.GetFileName(path) : path, ".js"));
+
+    /// <summary>
+    /// The runtime import as seen from one module. The runtime is written once at the output
+    /// root, so a module in a subfolder reaches it with <c>../</c>; a bare or absolute specifier
+    /// set in the options is used as given.
+    /// </summary>
+    private string RuntimeSpecifierFor(string currentModule)
+        => _options.RuntimeModule.StartsWith("./", StringComparison.Ordinal)
+            ? ModulePaths.Relative(currentModule, _options.RuntimeModule[2..])
+            : _options.RuntimeModule;
 
     private static Dictionary<INamedTypeSymbol, string> BuildTypeModuleMap(
         CSharpCompilation compilation,
@@ -251,9 +280,17 @@ public sealed class Transpiler
                 diagnostic.GetMessage(),
                 diagnostic.Location.IsInSource ? span.Path : null,
                 span.StartLinePosition.Line + 1,
-                span.StartLinePosition.Character + 1));
+                span.StartLinePosition.Character + 1,
+                span.EndLinePosition.Line + 1,
+                span.EndLinePosition.Character + 1));
         }
     }
+
+    /// <summary>
+    /// Roslyn diagnostic ids a transpile deliberately ignores. Exposed so an editor showing live
+    /// C# diagnostics hides exactly what the build hides, rather than keeping its own copy.
+    /// </summary>
+    public static IReadOnlySet<string> IgnoredRoslynDiagnostics => IgnoredDiagnostics;
 
     /// <summary>
     /// Diagnostics that are correct for a normal C# build but meaningless for a transpile.
@@ -269,7 +306,7 @@ public sealed class Transpiler
     // References
     // -----------------------------------------------------------------------------------------
 
-    private ImmutableArray<MetadataReference> BuildReferences()
+    internal ImmutableArray<MetadataReference> BuildReferences()
     {
         var references = new List<MetadataReference>();
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

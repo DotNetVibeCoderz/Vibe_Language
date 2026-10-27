@@ -37,6 +37,25 @@ public sealed class TranspileOptions
     /// <summary>Treat C# compiler warnings as transpile errors.</summary>
     public bool StrictWarnings { get; set; }
 
+    /// <summary>
+    /// Makes integer arithmetic and conversions <c>checked</c> by default, as the C# compiler's
+    /// <c>CheckForOverflowUnderflow</c> does: overflow throws <c>OverflowException</c>. Explicit
+    /// <c>checked</c> and <c>unchecked</c> contexts apply either way.
+    /// </summary>
+    public bool CheckOverflow { get; set; }
+
+    /// <summary>
+    /// Leaves out private members nothing references. JavaScript has no reflection to reach them,
+    /// so they are pure weight. Members whose initialisers might have side effects are kept.
+    /// </summary>
+    public bool RemoveUnusedPrivateMembers { get; set; } = true;
+
+    /// <summary>
+    /// Writes members of a non-public enum that is never turned into text as plain numbers, and
+    /// drops the enum object itself — the <c>const enum</c> treatment.
+    /// </summary>
+    public bool InlineEnums { get; set; } = true;
+
     /// <summary>Extra assembly paths to reference when binding the C# semantic model.</summary>
     public List<string> AdditionalReferences { get; } = new();
 

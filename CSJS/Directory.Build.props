@@ -7,7 +7,7 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
 
-    <VersionPrefix>0.1.0</VersionPrefix>
+    <VersionPrefix>0.2.0</VersionPrefix>
     <Authors>Gravicode Studios</Authors>
     <Company>Gravicode Studios</Company>
     <Product>CSJS</Product>
@@ -27,6 +27,7 @@
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageTags>csharp;javascript;transpiler;csjs;web;esnext;typescript;source-maps</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageIcon>icon.png</PackageIcon>
 
     <!-- A published package should carry its own symbols; a stack trace without them is noise. -->
     <IncludeSymbols>true</IncludeSymbols>
@@ -44,6 +45,10 @@
   <ItemGroup Condition="'$(IsPackable)' != 'false' AND '$(PackageId)' != ''">
     <None Include="$(MSBuildThisFileDirectory)build/nuget-readme.md"
           Pack="true" PackagePath="README.md" Visible="false" />
+
+    <!-- Rendered from build/icon/icon.svg; see build/icon/README.md to regenerate it. -->
+    <None Include="$(MSBuildThisFileDirectory)build/icon/icon.png"
+          Pack="true" PackagePath="icon.png" Visible="false" />
   </ItemGroup>
 
 </Project>

@@ -49,19 +49,31 @@ globalThis.App = App;
 | `CSJS.Cli` | `dotnet cs2js build` — build, run, watch, serve, new. |
 | `CSJS.Cli.Standalone` | The same tool under the shorter `cs2js` command. |
 | `CSJS.Testing` | Write tests in C#, run them on a JavaScript runtime. |
+| `CSJS.Build` | MSBuild integration: `dotnet build` transpiles an ordinary `.csproj`, CSJS errors land in the IDE error list, `dotnet run` serves the page. |
+| `CSJS.Templates` | `dotnet new` templates: browser app, npm library, ASP.NET + C# client, Blazor + CSJS, console-to-web. |
 
 ## Getting started
 
-```bash
-dotnet tool install --global CSJS.Cli.Standalone   # gives  cs2js build
-dotnet tool install --global CSJS.Cli              # gives  dotnet cs2js build
+With the templates — no global tool, full IntelliSense in Visual Studio, Rider, and VS Code:
 
-cs2js new HelloWorld
+```bash
+dotnet new install CSJS.Templates
+dotnet new csjs-app -n HelloWorld
 cd HelloWorld
-cs2js serve
+dotnet run
 ```
 
-Then open <http://localhost:5080>.
+Or with the CLI:
+
+```bash
+dotnet tool install --global CSJS.Cli.Standalone   # gives  cs2js build
+cs2js new HelloWorld
+cd HelloWorld
+cs2js serve                                        # live reload on save
+```
+
+Then open <http://localhost:5080>. `cs2js lsp` is a language server for any LSP editor, and
+`cs2js add <npm-package>` generates C# bindings from a package's TypeScript declarations.
 
 ## How types map
 
@@ -81,14 +93,21 @@ read it, so they cannot disagree.
 | `enum` | frozen object, both directions | const object + union type |
 | `record` | class with value equality | class |
 | `DateTime` | `Date` | `Date` |
+| `TimeSpan` | milliseconds | `number` |
+| `struct` | class with `$clone()` on copy | class |
+| `ref` / `out` parameters | extra elements in the result | tuple result |
 
 There is no runtime shim layer: a `List<T>` is a real `Array`, a `Dictionary<K,V>` a real `Map`.
 
 **Unmapped framework members are build errors, not guesses.** Emitting a call verbatim and
 letting the browser discover it does not exist is the worse failure mode.
 
-**Not supported, and reported rather than mistranslated:** `ref` and `out` on your own methods
-(return a tuple instead), pointers and `unsafe`, and unmapped BCL members.
+Covered through C# 14 — `field`, extension members, null-conditional assignment — along with
+full LINQ query syntax, `checked` arithmetic, struct value semantics, `Regex`, `System.Text.Json`,
+and `TimeSpan`. Whole programs are checked against .NET's own output.
+
+**Not supported, and reported rather than mistranslated:** pointers and `unsafe`, and unmapped
+BCL members.
 
 ## Documentation
 

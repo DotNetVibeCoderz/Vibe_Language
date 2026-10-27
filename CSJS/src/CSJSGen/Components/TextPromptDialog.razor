@@ -1,6 +1,6 @@
-@* A single-field prompt, used for project and file paths. *@
+@* A single-field prompt, used for names. Paths come from the native dialogs instead. *@
 @inject IJSRuntime Js
-@inject FolderPicker Picker
+@inject NativeDialogs Dialogs
 
 <div class="overlay" @onclick="OnCancel">
     <div class="dialog" style="width:min(460px, calc(100vw - 48px))" @onclick:stopPropagation>
@@ -59,7 +59,7 @@
         while (!string.IsNullOrWhiteSpace(start) && !Directory.Exists(start))
             start = Path.GetDirectoryName(start) ?? "";
 
-        var chosen = await Picker.PickAsync(Title, start);
+        var chosen = await Dialogs.PickFolderAsync(Title, start);
         if (chosen is null) return;
 
         _value = chosen;

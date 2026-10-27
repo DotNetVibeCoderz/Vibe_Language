@@ -30,12 +30,33 @@ dragging the divider between them (or with arrow keys once the divider has focus
 - **Properties** — facts about the file, and about what compiling it produced: emitted size, the
   source-to-output ratio, whether the runtime was needed, and the types you declared.
 
+The layout persists. Which panels are showing, how wide each one is, the line-number toggle, and
+the theme are written back to `app.config` once a change settles (and again as the window
+closes), so the next session opens the way this one was left. Restored widths are clamped to the
+same bounds a drag is, so a hand-edited value cannot produce an unusable panel.
+
 Below the editor sits the **output pane** with three tabs: diagnostics, the generated JavaScript,
 and the generated `.d.ts`.
 
 Between them runs the **seam** — a gradient from violet (source) to amber (output). Compiling
 sends a pulse along it. The colour is not decoration: violet means C# side and amber means
 emitted side, consistently, everywhere in the app.
+
+### IntelliSense
+
+The editor's completion, hover, and signature help are real C#, answered by
+`CSJS.LanguageService` — the same engine behind `cs2js lsp` — running in-process. It binds the
+whole open project the way a compile does, so a type declared in a sibling file completes, and
+`Document.` lists the actual `CSJS.Browser` bindings.
+
+Hover shows what a member becomes in JavaScript: the `MemberMap` template for a BCL member
+(`text.ToUpperInvariant()` → `{this}.toUpperCase()`), the emitted name for a binding
+(`document.querySelector(…)`), or a warning when a framework member has no mapping.
+
+Diagnostics are live. Once typing pauses, compiler errors and the transpiler's own — `CSJS0002`
+for an unmapped member — are underlined in the margin without pressing Compile. Requests run off
+the UI thread, and a newer keystroke cancels the request it supersedes. See
+[Language server](language-server.md).
 
 ### Keyboard
 
@@ -78,9 +99,11 @@ sibling — the bindings file of a three.js project, say — cannot be compiled 
 ### Project and file lifecycle
 
 Both projects and individual `.csjs` files support new, open, save, save-as, and close, from the
-**Berkas** menu, with the accelerators the menu prints. The project location fields carry a
-**Telusuri…** button that opens the system folder picker, so a path is something you pick
-rather than something you have to spell.
+**Berkas** menu, with the accelerators the menu prints. Every path comes from the system's own
+dialogs: **Buka proyek** is the folder picker, **Buka berkas** and **Simpan sebagai** are the
+open and save dialogs (the save dialog asks before overwriting), and the new-project location
+carries a **Telusuri…** button. A path is something you pick rather than something you have to
+spell. The only thing still typed is a new file's *name*.
 
 **Berkas → Proyek baru** opens a gallery of 21 templates across six categories, from a blank
 project to a three.js scene, an Electron desktop app, and a WebSocket chat server. Each one is a working application that builds, not a stub — so the
@@ -97,6 +120,9 @@ handles tables, media, and code blocks. Every code block gets a copy button; the
 in a reply gets **Terapkan ke editor**.
 
 ### Attachments
+
+Both attachment buttons open the system file dialog, filtered to images or documents, and
+accept several files at once.
 
 Images become image content parts the model can look at. Documents become a link appended to the
 message. The distinction matters: a model can see the first and only fetch the second.
@@ -141,6 +167,26 @@ caught while Jack can still fix it rather than being discovered by you at the ne
 
 **Adding a capability means adding a kernel function.** The chat loop never changes.
 
+### Tool-call transcript
+
+Every function Jack invokes appears in his reply as a compact row, placed where it happened — so
+"let me check" is followed by the actual `Csjs.compile`, then the text written after it. The row
+shows the function, a preview of its first argument, a verdict, and how long it took; click it
+for the full arguments and result.
+
+| Mark | Meaning |
+| --- | --- |
+| `◌` | Still running. |
+| `✓` | Returned, and the result reads as success. |
+| `!` | Returned but reported a failure — `COMPILE FAILED`, `RUN FAILED`, `NOT SUPPORTED`, or an edit that does not compile. The tool worked; the code did not pass. |
+| `✕` | The function threw. |
+
+What went in is labelled in violet and what came back in amber, the same source/emitted split
+as everywhere else. The rows are captured by a Semantic Kernel function-invocation filter
+(`Services/ToolCallRecorder.cs`), which observes without altering what the model receives, and
+they are saved with the session — older session files without them load unchanged. Long
+arguments and results are truncated for display.
+
 ### Prompt templates
 
 An empty session shows a gallery of starter prompts across seven categories — Mulai, Interaksi,
@@ -155,7 +201,7 @@ Everything lives in `app.config`, so persona and model change without a rebuild.
 gitignored — copy the template and fill in the provider you want:
 
 ```bash
-copy src\CSJSGenpp.config.template src\CSJSGenpp.config
+copy src\CSJSGen\app.config.template src\CSJSGen\app.config
 ```
 
 Keys can also come from the environment, which is the safer habit: `OPENAI_API_KEY`,
@@ -171,6 +217,7 @@ Keys can also come from the environment, which is the safer habit: `OPENAI_API_K
 <add key="Ai.SystemPrompt" value="You are Jack The Code Bender…" />
 <add key="Tools.Tavily.ApiKey" value="" />
 <add key="App.Theme" value="dark" />
+<add key="Layout.ChatWidth" value="400" />
 ```
 
 The settings dialog writes back to this file.

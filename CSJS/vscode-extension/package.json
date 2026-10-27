@@ -1,10 +1,11 @@
 {
   "name": "csjs",
   "displayName": "CSJS — C# for JavaScript",
-  "description": "Syntax highlighting, IntelliSense, build tasks, and a C#-to-JavaScript debugging bridge for .csjs files.",
+  "description": "Syntax highlighting, C# IntelliSense with live CSJS diagnostics (cs2js lsp), build tasks, and a C#-to-JavaScript debugging bridge for .csjs files.",
   "version": "0.1.0",
   "publisher": "gravicode",
   "license": "MIT",
+  "icon": "images/icon.png",
   "engines": { "vscode": "^1.85.0" },
   "categories": ["Programming Languages", "Debuggers", "Snippets"],
   "keywords": ["csjs", "csharp", "javascript", "transpiler"],
@@ -35,7 +36,8 @@
       { "command": "csjs.serve", "title": "CSJS: Build and serve" },
       { "command": "csjs.watch", "title": "CSJS: Watch and rebuild" },
       { "command": "csjs.showOutput", "title": "CSJS: Show generated JavaScript" },
-      { "command": "csjs.newProject", "title": "CSJS: New project" }
+      { "command": "csjs.newProject", "title": "CSJS: New project" },
+      { "command": "csjs.restartLanguageServer", "title": "CSJS: Restart language server" }
     ],
     "menus": {
       "editor/title": [
@@ -102,9 +104,33 @@
           "type": "boolean",
           "default": true,
           "description": "Reveal the CSJS output channel when a build reports errors."
+        },
+        "csjs.languageServer.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Run `cs2js lsp` for completion, hover, signature help, go to definition, and live CSJS diagnostics."
+        },
+        "csjs.languageServer.path": {
+          "type": "string",
+          "default": "",
+          "description": "Command that starts the language server, without the `lsp` argument: a path to cs2js, or a command line such as `dotnet cs2js`. When empty, `cs2js` is used if it is on PATH, otherwise `dotnet cs2js`."
+        },
+        "csjs.languageServer.csharpFiles": {
+          "type": "boolean",
+          "default": true,
+          "description": "Also serve plain .cs files inside a folder holding csjs.json. Turn off if another C# extension should own them."
+        },
+        "csjs.trace.server": {
+          "type": "string",
+          "enum": ["off", "messages", "verbose"],
+          "default": "off",
+          "description": "Log the JSON-RPC traffic with the language server to the CSJS output channel."
         }
       }
     }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   },
   "repository": { "type": "git", "url": "https://github.com/DotNetVibeCoderz/Vibe_Language" },
   "homepage": "https://github.com/DotNetVibeCoderz/Vibe_Language/tree/main/CSJS"

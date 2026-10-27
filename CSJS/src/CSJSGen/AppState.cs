@@ -1,3 +1,5 @@
+using CSJSGen.Models;
+
 namespace CSJSGen;
 
 /// <summary>
@@ -14,9 +16,9 @@ public sealed class AppState
 
     // Panel widths in CSS pixels. Bounded so a drag cannot make a panel unusable or squeeze the
     // editor out of existence.
-    private double _explorerWidth = 232;
-    private double _propertiesWidth = 248;
-    private double _chatWidth = 400;
+    private double _explorerWidth = WorkspaceLayout.ExplorerDefault;
+    private double _propertiesWidth = WorkspaceLayout.PropertiesDefault;
+    private double _chatWidth = WorkspaceLayout.ChatDefault;
 
     public event Action? Changed;
 
@@ -47,19 +49,19 @@ public sealed class AppState
     public double ExplorerWidth
     {
         get => _explorerWidth;
-        set { _explorerWidth = Math.Clamp(value, 150, 480); Changed?.Invoke(); }
+        set { _explorerWidth = Math.Clamp(value, WorkspaceLayout.ExplorerMin, WorkspaceLayout.ExplorerMax); Changed?.Invoke(); }
     }
 
     public double PropertiesWidth
     {
         get => _propertiesWidth;
-        set { _propertiesWidth = Math.Clamp(value, 160, 480); Changed?.Invoke(); }
+        set { _propertiesWidth = Math.Clamp(value, WorkspaceLayout.PropertiesMin, WorkspaceLayout.PropertiesMax); Changed?.Invoke(); }
     }
 
     public double ChatWidth
     {
         get => _chatWidth;
-        set { _chatWidth = Math.Clamp(value, 280, 720); Changed?.Invoke(); }
+        set { _chatWidth = Math.Clamp(value, WorkspaceLayout.ChatMin, WorkspaceLayout.ChatMax); Changed?.Invoke(); }
     }
 
     public string Theme
@@ -80,6 +82,34 @@ public sealed class AppState
     public bool IsCompiling { get; set; }
 
     public void Notify() => Changed?.Invoke();
+
+    /// <summary>
+    /// Restores the layout and theme a previous session saved. Runs before the first render, so
+    /// it raises nothing — there is no one listening yet, and nothing changed from their view.
+    /// </summary>
+    public void Restore(WorkspaceLayout layout, string theme)
+    {
+        _showExplorer = layout.ShowExplorer;
+        _showProperties = layout.ShowProperties;
+        _showChat = layout.ShowChat;
+        _showLineNumbers = layout.ShowLineNumbers;
+        _explorerWidth = Math.Clamp(layout.ExplorerWidth, WorkspaceLayout.ExplorerMin, WorkspaceLayout.ExplorerMax);
+        _propertiesWidth = Math.Clamp(layout.PropertiesWidth, WorkspaceLayout.PropertiesMin, WorkspaceLayout.PropertiesMax);
+        _chatWidth = Math.Clamp(layout.ChatWidth, WorkspaceLayout.ChatMin, WorkspaceLayout.ChatMax);
+        _theme = theme.Equals("light", StringComparison.OrdinalIgnoreCase) ? "light" : "dark";
+    }
+
+    /// <summary>The current layout, in the shape <c>app.config</c> stores.</summary>
+    public WorkspaceLayout CaptureLayout() => new()
+    {
+        ShowExplorer = _showExplorer,
+        ShowProperties = _showProperties,
+        ShowChat = _showChat,
+        ShowLineNumbers = _showLineNumbers,
+        ExplorerWidth = _explorerWidth,
+        PropertiesWidth = _propertiesWidth,
+        ChatWidth = _chatWidth,
+    };
 
     public void ToggleTheme()
     {

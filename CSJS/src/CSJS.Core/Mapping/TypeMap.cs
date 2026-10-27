@@ -81,6 +81,9 @@ public static class TypeMap
                 case "System.Linq.IOrderedEnumerable":
                 // A group is an Array with a key attached, so it is array-shaped.
                 case "System.Linq.IGrouping":
+                // A queue and a stack are arrays with their next item at index 0.
+                case "System.Collections.Generic.Queue":
+                case "System.Collections.Generic.Stack":
                     return JsShape.Array;
 
                 case "System.Collections.Generic.Dictionary":
@@ -101,6 +104,14 @@ public static class TypeMap
                 case "System.DateTime":
                 case "System.DateTimeOffset":
                     return JsShape.Object;
+
+                // A TimeSpan is a number of milliseconds — what subtracting two Dates yields.
+                case "System.TimeSpan":
+                    return JsShape.Number;
+
+                // A Guid is its lowercase string form.
+                case "System.Guid":
+                    return JsShape.String;
             }
         }
 
@@ -160,6 +171,10 @@ public static class TypeMap
             if (IsNullableValueType(named, out var underlying))
                 return $"{ToTypeScript(underlying)} | null";
 
+            // A tuple is emitted as an array, so it is declared as a TypeScript tuple.
+            if (named.IsTupleType)
+                return $"[{string.Join(", ", named.TupleElements.Select(e => ToTypeScript(e.Type)))}]";
+
             var args = named.TypeArguments;
             switch (Unbound(named))
             {
@@ -177,6 +192,8 @@ public static class TypeMap
                 case "System.Collections.Generic.IReadOnlyList":
                 case "System.Collections.Generic.IReadOnlyCollection":
                 case "System.Linq.IOrderedEnumerable":
+                case "System.Collections.Generic.Queue":
+                case "System.Collections.Generic.Stack":
                     return args.Length == 1 ? $"{ToTypeScript(args[0])}[]" : "any[]";
 
                 // A group is an array that also carries its key.
@@ -200,6 +217,15 @@ public static class TypeMap
                 case "System.DateTime":
                 case "System.DateTimeOffset":
                     return "Date";
+
+                case "System.TimeSpan":
+                    return "number";
+
+                case "System.Guid":
+                    return "string";
+
+                case "System.Text.RegularExpressions.Regex":
+                    return "RegExp";
 
                 case "System.Action":
                     return args.Length == 0
@@ -236,6 +262,88 @@ public static class TypeMap
         }
 
         return "any";
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // The inverse direction: TypeScript into C#
+    // ---------------------------------------------------------------------------------------
+    //
+    // The binding generator reads a library's .d.ts and has to land on C# types the emitter will
+    // turn back into exactly what the library expects. Keeping the inverse here, beside
+    // ToTypeScript, is what makes that hold: a mapping changed in one direction is in plain sight
+    // of the other, and BindingGeneratorTests round-trips every entry through ToTypeScript.
+
+    /// <summary>
+    /// The C# type for a TypeScript type name from the shared vocabulary, given its type
+    /// arguments already rendered as C#. Returns null for a name outside the vocabulary.
+    /// <para>
+    /// Where several C# types render as one TypeScript type, the inverse picks the one that loses
+    /// nothing: <c>number</c> becomes <c>double</c>, never <c>int</c>.
+    /// </para>
+    /// </summary>
+    public static string? FromTypeScript(string name, IReadOnlyList<string> typeArguments)
+    {
+        string Arg(int i) => i < typeArguments.Count ? typeArguments[i] : "object";
+
+        switch (name)
+        {
+            case "string": return "string";
+            case "number": return "double";
+            case "boolean": return "bool";
+            case "bigint": return "long";
+            case "void":
+            case "undefined": return "void";
+            case "any":
+            case "unknown":
+            case "object": return "object";
+            case "Date": return "DateTime";
+
+            // Promise<void> is what a C# Task renders as, so it comes back as one.
+            case "Promise":
+            case "PromiseLike":
+                return typeArguments.Count == 0 || Arg(0) == "void" ? "Task" : $"Task<{Arg(0)}>";
+
+            case "Array":
+            case "ReadonlyArray":
+                return FromTypeScriptArray(Arg(0));
+
+            // A Dictionary is a real Map and a HashSet a real Set, which is why these are exact.
+            case "Map":
+            case "ReadonlyMap":
+                return $"Dictionary<{Arg(0)}, {Arg(1)}>";
+
+            case "Set":
+            case "ReadonlySet":
+                return $"HashSet<{Arg(0)}>";
+        }
+
+        return null;
+    }
+
+    /// <summary>The C# type for <c>T[]</c>. An array is a JavaScript array, so no wrapper is needed.</summary>
+    public static string FromTypeScriptArray(string elementType)
+        => elementType == "void" ? "object[]" : $"{elementType}[]";
+
+    /// <summary>The C# type for <c>T | null</c>, the inverse of how a nullable renders.</summary>
+    public static string FromTypeScriptNullable(string type)
+        => type.EndsWith('?') || type == "void" ? type : type + "?";
+
+    /// <summary>The C# type for a tuple <c>[A, B]</c>, which the emitter renders as an array.</summary>
+    public static string FromTypeScriptTuple(IReadOnlyList<string> elementTypes)
+        => $"({string.Join(", ", elementTypes)})";
+
+    /// <summary>
+    /// The C# delegate for a function type, the inverse of how <c>Action</c> and <c>Func</c>
+    /// render: a <c>void</c> return is an <c>Action</c>, anything else a <c>Func</c>.
+    /// </summary>
+    public static string FromTypeScriptFunction(IReadOnlyList<string> parameterTypes, string returnType)
+    {
+        if (returnType == "void")
+            return parameterTypes.Count == 0 ? "Action" : $"Action<{string.Join(", ", parameterTypes)}>";
+
+        return parameterTypes.Count == 0
+            ? $"Func<{returnType}>"
+            : $"Func<{string.Join(", ", parameterTypes)}, {returnType}>";
     }
 
     private static string RenderLambdaParams(IReadOnlyList<ITypeSymbol> args, int count)

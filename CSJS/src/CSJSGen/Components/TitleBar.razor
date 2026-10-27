@@ -3,6 +3,7 @@
 @inject ProjectService Projects
 @inject NodeRunner Runner
 @inject PreviewServer Preview
+@inject NativeDialogs Dialogs
 @inject IJSRuntime Js
 
 <header class="titlebar">
@@ -196,9 +197,9 @@
         switch (command)
         {
             case "new-project": NewProject(); break;
-            case "open-project": OpenProject(); break;
+            case "open-project": _ = OpenProject(); break;
             case "new-file": NewFile(); break;
-            case "open-file": OpenFile(); break;
+            case "open-file": _ = OpenFile(); break;
             case "save-all": SaveAll(); break;
             case "compile": _ = OnCompile.InvokeAsync(); break;
             case "run": _ = OnRun.InvokeAsync(); break;
@@ -293,27 +294,27 @@
         State.Notify();
     }
 
-    private void OpenProject()
+    /// <summary>The folder a dialog opens in: the open project, else the default project root.</summary>
+    private string StartFolder => Projects.Current is { Directory.Length: > 0 } project
+        ? project.Directory
+        : Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments), "CSJSGen");
+
+    private async Task OpenProject()
     {
         _openMenu = null;
-        _dialog = new PromptRequest(
-            "Buka proyek",
-            "Lokasi folder",
-            Path.Combine(System.Environment.GetFolderPath(System.Environment.SpecialFolder.MyDocuments), "CSJSGen"),
-            @"C:\path\ke\proyek",
-            EventCallback.Factory.Create<string>(this, path =>
-            {
-                _dialog = null;
-                if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
-                {
-                    State.OutputText = $"Folder tidak ditemukan: {path}";
-                    State.Notify();
-                    return;
-                }
 
-                Projects.OpenProject(path.Trim());
-            }),
-            ShowBrowse: true);
+        var path = await Dialogs.PickFolderAsync("Buka proyek", StartFolder);
+        if (path is null) return;
+
+        try
+        {
+            Projects.OpenProject(path);
+        }
+        catch (Exception ex)
+        {
+            State.OutputText = $"Gagal membuka proyek: {ex.Message}";
+            State.Notify();
+        }
     }
 
     private void CloseProject()
@@ -341,26 +342,22 @@
             }));
     }
 
-    private void OpenFile()
+    private async Task OpenFile()
     {
         _openMenu = null;
-        _dialog = new PromptRequest(
-            "Buka berkas",
-            "Lokasi berkas",
-            "",
-            @"C:\path\ke\Program.csjs",
-            EventCallback.Factory.Create<string>(this, path =>
-            {
-                _dialog = null;
-                if (string.IsNullOrWhiteSpace(path) || !File.Exists(path))
-                {
-                    State.OutputText = $"Berkas tidak ditemukan: {path}";
-                    State.Notify();
-                    return;
-                }
 
-                Projects.OpenFile(path.Trim());
-            }));
+        var path = await Dialogs.OpenFileAsync("Buka berkas", NativeDialogs.SourceFilter, StartFolder);
+        if (path is null) return;
+
+        try
+        {
+            Projects.OpenFile(path);
+        }
+        catch (Exception ex)
+        {
+            State.OutputText = $"Gagal membuka berkas: {ex.Message}";
+            State.Notify();
+        }
     }
 
     private void Save()
@@ -369,23 +366,25 @@
         Projects.SaveActive();
     }
 
-    private void SaveAs()
+    private async Task SaveAs()
     {
         _openMenu = null;
         var current = Projects.ActiveFile;
         if (current is null) return;
 
-        _dialog = new PromptRequest(
-            "Simpan sebagai",
-            "Lokasi tujuan",
-            current.Path,
-            @"C:\path\ke\Berkas.csjs",
-            EventCallback.Factory.Create<string>(this, path =>
-            {
-                _dialog = null;
-                if (string.IsNullOrWhiteSpace(path)) return;
-                Projects.SaveActiveAs(path.Trim());
-            }));
+        // The dialog asks before overwriting, so there is nothing left to confirm here.
+        var path = await Dialogs.SaveFileAsync("Simpan sebagai", NativeDialogs.SourceFilter, current.Path);
+        if (path is null) return;
+
+        try
+        {
+            Projects.SaveActiveAs(path);
+        }
+        catch (Exception ex)
+        {
+            State.OutputText = $"Gagal menyimpan: {ex.Message}";
+            State.Notify();
+        }
     }
 
     private void SaveAll()

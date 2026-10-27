@@ -19,6 +19,8 @@ public partial class MainWindow : Window
                 if (this.FindControl<Border>("LoadingOverlay") is { } overlay)
                     overlay.IsVisible = false;
             });
+
+            Closing += (_, _) => host.FlushLayout();
         }
     }
 

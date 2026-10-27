@@ -82,6 +82,9 @@ Selengkapnya di [galeri dokumentasi](docs/README.md#applications-built-with-csjs
 ## Pemasangan
 
 ```bash
+# Template proyek — cara tercepat memulai, tanpa perlu tool global
+dotnet new install CSJS.Templates
+
 # CLI. Pasang salah satu atau keduanya — bedanya hanya nama perintah.
 dotnet tool install --global CSJS.Cli.Standalone   # memberi  cs2js build
 dotnet tool install --global CSJS.Cli              # memberi  dotnet cs2js build
@@ -93,12 +96,23 @@ dotnet add package CSJS.Core
 ## Memulai proyek
 
 ```bash
-cs2js new HelloWorld
+dotnet new csjs-app -n HelloWorld
 cd HelloWorld
-cs2js serve
+dotnet run
 ```
 
-Lalu buka <http://localhost:5080>.
+Lalu buka <http://localhost:5080>. Proyeknya `.csproj` biasa yang dibangun oleh
+[`CSJS.Build`](src/CSJS.Build), jadi Visual Studio, Rider, dan VS Code memberi IntelliSense penuh
+dan kesalahan CSJS muncul di daftar error IDE. Template lainnya: `csjs-lib` (pustaka npm dengan
+typing `.d.ts`), `csjs-aspnet`, `csjs-blazor`, dan `csjs-console` — lihat [templates](templates).
+
+Atau dengan CLI:
+
+```bash
+cs2js new HelloWorld
+cd HelloWorld
+cs2js serve        # build ulang saat disimpan; halaman dimuat ulang, CSS diganti di tempat
+```
 
 ## CLI
 
@@ -108,7 +122,14 @@ Lalu buka <http://localhost:5080>.
 | `cs2js build [dir]` | Mentranspilasi ke direktori keluaran. |
 | `cs2js run [dir\|berkas]` | Build, lalu jalankan dengan Node. |
 | `cs2js watch [dir]` | Build ulang setiap kali berkas sumber berubah. |
-| `cs2js serve [dir]` | Build dan sajikan lewat HTTP (`--port`, bawaan 5080). |
+| `cs2js serve [dir]` | Build dan sajikan lewat HTTP dengan live reload (`--port`, bawaan 5080). |
+| `cs2js build --bundle [--minify]` | Satu `bundle.js` berisi hanya helper runtime yang dipakai, beserta source map-nya. |
+| `cs2js add <paket-npm>` | Mengambil paket dan membuat binding C# dari deklarasi TypeScript-nya. |
+| `cs2js bind <berkas.d.ts>` | Membuat binding C# dari berkas deklarasi. |
+| `cs2js lsp` | Language server: IntelliSense C# dengan diagnostik CSJS, untuk editor apa pun yang mendukung LSP. |
+
+Build berjalan inkremental — proyek yang tidak berubah dilewati, dan `watch` hanya mengemisi
+ulang yang berubah. Stack trace Node dari `cs2js run` menunjuk ke baris C# Anda.
 
 Setiap setelan punya nilai bawaan, jadi proyek dengan sumber di `src/` bisa dibangun tanpa
 berkas konfigurasi sama sekali. Bila diperlukan, `csjs.json` berbentuk seperti ini:
@@ -127,11 +148,18 @@ berkas konfigurasi sama sekali. Bila diperlukan, `csjs.json` berbentuk seperti i
 
 ## C# apa saja yang didukung
 
-**Didukung.** Kelas, interface, struct, record, enum, generik, pewarisan dan dispatch virtual,
-properti (auto maupun terhitung), indexer, event, delegate, lambda dan closure, `async`/`await`,
-iterator (`yield`), LINQ (sintaks method dan sebagian besar sintaks query), pattern matching,
-switch expression, tuple dan dekonstruksi, pernyataan `using`, penanganan exception dengan klausa
-catch bertipe, interpolasi string dengan penentu format, serta overloading operator.
+**Didukung, sampai C# 14.** Kelas, interface, struct dengan semantik nilai sungguhan, record,
+enum, generik, pewarisan dan dispatch virtual, properti (auto, terhitung, dan kata kunci `field`),
+indexer, event, delegate, lambda dan closure, `async`/`await`, iterator, LINQ dalam sintaks method
+maupun sintaks query lengkap (`join`, `let`, `group … into`), pattern matching, switch expression,
+tuple dan dekonstruksi, parameter `ref` dan `out`, aritmetika `checked`/`unchecked`, extension
+method dan extension member C# 14, null-conditional assignment, `using`, klausa catch bertipe,
+interpolasi string dengan penentu format, serta overloading operator.
+
+Cakupan framework meliputi string, matematika, koleksi (`List`, `Dictionary`, `HashSet`,
+`Stack`, `Queue`), seluruh operator LINQ, `Regex`, `DateTime` dan `TimeSpan`,
+`System.Text.Json`, `StringBuilder`, serta API `Enum`. Program utuh dijalankan di .NET dan di Node
+dalam suite pengujian, dan keduanya harus mencetak hal yang sama.
 
 **Bagaimana tipe dipetakan.** Tabel ini adalah kontraknya — emitter, penulis `.d.ts`, dan
 penyedia IntelliSense membaca tabel yang sama, jadi ketiganya tidak mungkin berbeda.
@@ -150,10 +178,11 @@ penyedia IntelliSense membaca tabel yang sama, jadi ketiganya tidak mungkin berb
 | `enum` | objek beku, dua arah | const object + union type |
 | `record` | kelas dengan kesetaraan nilai | class |
 | `DateTime` | `Date` | `Date` |
+| `TimeSpan` | milidetik | `number` |
+| `struct` | kelas, disalin di mana pun C# menyalin | kelas dengan `$clone()` |
 
-**Tidak didukung, dan dilaporkan alih-alih diterjemahkan keliru:** parameter `ref` dan `out` pada
-method Anda sendiri (gunakan tuple sebagai gantinya), pointer dan `unsafe`, serta anggota BCL yang
-belum dipetakan. Poin terakhir itu penting: anggota tak terpetakan adalah kesalahan build, bukan
+**Tidak didukung, dan dilaporkan alih-alih diterjemahkan keliru:** pointer dan `unsafe`, serta
+anggota BCL yang belum dipetakan. Poin terakhir itu penting: anggota tak terpetakan adalah kesalahan build, bukan
 JavaScript yang gagal saat dijalankan.
 
 `lock` tetap dikompilasi dengan peringatan — JavaScript berutas tunggal, jadi badan blok berjalan
@@ -197,20 +226,24 @@ tanpa perlu `[JsName]` di setiap anggota.
 | --- | --- |
 | **[`CSJS.Core`](src/CSJS.Core)** | Transpiler: front end Roslyn, emitter JavaScript, emitter `.d.ts`, source map. |
 | **[`CSJS.Interop`](src/CSJS.Interop)** | Atribut interop dan binding browser bertipe. |
-| **[`CSJS.Cli`](src/CSJS.Cli)** | `cs2js` — build, run, watch, serve, new. |
+| **[`CSJS.Cli`](src/CSJS.Cli)** | `cs2js` — build, run, watch, serve, new, bind, add, lsp. |
+| **[`CSJS.Build`](src/CSJS.Build)** | Integrasi MSBuild: `dotnet build` mentranspilasi sebuah `.csproj`. |
+| **[`CSJS.LanguageService`](src/CSJS.LanguageService)** | Completion, hover, signature help, definition, dan diagnostik — dipakai bersama oleh `cs2js lsp` dan CSJSGen. |
 | **[`CSJS.Testing`](src/CSJS.Testing)** | Menulis test dalam C#, menjalankannya di runtime JavaScript. |
 | **[`CSJSGen`](src/CSJSGen)** | Editor desktop dengan **Jack The Code Bender**, asisten AI. |
 | **[Playground](playground)** | Transpiler yang berjalan di browser lewat WebAssembly. |
-| **[Ekstensi VS Code](vscode-extension)** | Pewarnaan sintaks, IntelliSense, task, jembatan debugging. |
-| **[Template](templates)** | Blazor Hybrid, ASP.NET + JS, Console-to-Web. |
+| **[Ekstensi VS Code](vscode-extension)** | Language client untuk `cs2js lsp`, pewarnaan sintaks, task, jembatan debugging. |
+| **[Template](templates)** | `CSJS.Templates`: aplikasi browser, pustaka npm, ASP.NET + JS, Blazor Hybrid, Console-to-Web. |
+| **[Binding framework](bindings)** | React, Vue, dan Angular, dibuat dari `.d.ts`-nya oleh `cs2js add`. |
 | **[Contoh](samples)** | Hello world, DOM, event, three.js. |
 
 ## CSJSGen
 
 Aplikasi Avalonia yang permukaan editornya adalah Blazor: pohon berkas, **Monaco** untuk kode C#
 Anda, panel properti, dan panel keluaran yang menampilkan JavaScript dan `.d.ts` hasil
-transpilasi. Panel bisa disembunyikan dan diubah lebarnya; kesalahan transpiler muncul di margin
-editor.
+transpilasi. Panel bisa disembunyikan dan diubah lebarnya, dan tata letaknya diingat antarsesi;
+completion, hover, signature help, dan diagnostik langsung berasal dari language service yang
+sama dengan `cs2js lsp`.
 
 **Berkas → Proyek baru** menawarkan 21 template, dari proyek kosong sampai scene three.js.
 Semuanya aplikasi yang benar-benar bisa dibangun, bukan kerangka kosong.
@@ -218,7 +251,8 @@ Semuanya aplikasi yang benar-benar bisa dibangun, bukan kerangka kosong.
 Di sebelahnya ada **Jack The Code Bender** — asisten berbasis Semantic Kernel dengan penyedia
 yang bisa dipilih (OpenAI, Azure OpenAI, Anthropic, Gemini, DeepSeek, Ollama). Jack bisa
 mengompilasi, menjalankan, dan menyunting kode yang ia tulis, karena itu semua kernel function,
-bukan sekadar klaim:
+bukan sekadar klaim — dan setiap pemanggilan tampil di percakapan sebagai langkah yang bisa
+dibuka, lengkap dengan argumen dan hasilnya:
 
 | Fungsi | Kegunaannya |
 | --- | --- |
@@ -254,7 +288,9 @@ Dokumentasi lengkap ada di [`docs/`](docs/):
 - [Panduan memulai](docs/getting-started.md)
 - [Dukungan bahasa](docs/language-support.md) — apa yang ditranspilasi, dan menjadi apa
 - [Panduan interop](docs/interop.md)
-- [Referensi CLI](docs/cli.md)
+- [Referensi CLI](docs/cli.md) — termasuk bundling, live reload, dan `CSJS.Build`
+- [Binding](docs/bindings.md) — membuat C# dari deklarasi TypeScript
+- [Language server](docs/language-server.md) — VS Code, Rider, Visual Studio, Neovim
 - [Panduan CSJSGen](docs/csjsgen.md)
 - [Arsitektur](docs/architecture.md)
 

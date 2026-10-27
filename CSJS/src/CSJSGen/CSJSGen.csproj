@@ -55,6 +55,8 @@
     -->
     <ProjectReference Include="..\CSJS.Cli\CSJS.Cli.csproj" />
     <ProjectReference Include="..\CSJS.Core\CSJS.Core.csproj" />
+    <!-- Monaco's IntelliSense: the engine behind `cs2js lsp`, called in-process. -->
+    <ProjectReference Include="..\CSJS.LanguageService\CSJS.LanguageService.csproj" />
     <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
     <ProjectReference Include="..\CSJS.Testing\CSJS.Testing.csproj" />
   </ItemGroup>

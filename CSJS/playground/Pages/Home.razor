@@ -2,6 +2,7 @@
 @using CSJS.Core
 @inject IJSRuntime Js
 @inject ReferenceLoader References
+@inject NavigationManager Navigation
 
 <PageTitle>CSJS Playground</PageTitle>
 
@@ -26,6 +27,10 @@
             <input type="checkbox" @bind="_autoRun" />
             <span>Transpile otomatis</span>
         </label>
+
+        <button class="share" @onclick="Share" title="Salin tautan yang memuat kode ini">
+            @(_shared ? "✓ Tautan disalin" : "⇪ Bagikan")
+        </button>
 
         <button class="run" @onclick="Transpile" disabled="@_busy">
             @(_busy ? "…" : "⟳") Transpile
@@ -93,6 +98,37 @@
     private double _elapsedMs;
 
     private CancellationTokenSource? _debounce;
+    private bool _shared;
+
+    /// <summary>A shared link (<c>#code=…</c>) opens with its program instead of the default sample.</summary>
+    protected override void OnInitialized()
+    {
+        if (ShareLink.Decode(Navigation.Uri) is { } shared) _source = shared;
+    }
+
+    /// <summary>
+    /// Puts the current program in the address bar and on the clipboard. The page is not
+    /// reloaded; the fragment is only replaced, so the link is ready to paste into a bug report.
+    /// </summary>
+    private async Task Share()
+    {
+        var url = Navigation.Uri.Split('#')[0] + "#" + ShareLink.Encode(_source);
+        try
+        {
+            await Js.InvokeVoidAsync("history.replaceState", null, "", url);
+            await Js.InvokeVoidAsync("navigator.clipboard.writeText", url);
+        }
+        catch (JSException)
+        {
+            // Clipboard access can be blocked; the link is still in the address bar.
+        }
+
+        _shared = true;
+        StateHasChanged();
+        await Task.Delay(1800);
+        _shared = false;
+        StateHasChanged();
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {

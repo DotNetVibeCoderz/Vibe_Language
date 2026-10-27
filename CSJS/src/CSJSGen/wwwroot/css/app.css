@@ -1429,3 +1429,111 @@ input[type="range"] { width: 100%; accent-color: var(--source); }
   line-height: 1.5;
   color: var(--text-faint);
 }
+
+/* ---------------------------------------------------------------------------
+   Tool-call transcript.
+
+   Each kernel function Jack invokes is one compact row, placed where it
+   happened in the reply. The name is what Jack asked for — source side, violet.
+   The result is what came back — emitted side, amber. Rows are <details>, so
+   they stay collapsed until someone wants the arguments and output.
+   --------------------------------------------------------------------------- */
+
+.tool-calls {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+}
+
+.tool-call {
+  border: 1px solid var(--edge-soft);
+  border-left: 2px solid var(--source-dim);
+  border-radius: var(--radius-sm);
+  background: var(--sunken);
+  font-family: var(--mono);
+  font-size: 10.5px;
+}
+
+.tool-call > summary {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  min-width: 0;
+}
+
+.tool-call > summary::-webkit-details-marker { display: none; }
+.tool-call > summary:hover { background: var(--source-wash); }
+.tool-call > summary:focus-visible { outline: 2px solid var(--source); outline-offset: -2px; }
+
+.tool-status {
+  width: 12px;
+  flex-shrink: 0;
+  text-align: center;
+  font-weight: 700;
+}
+
+.tool-call.ok .tool-status { color: var(--success); }
+.tool-call.reported .tool-status { color: var(--output); }
+.tool-call.error .tool-status { color: var(--danger); }
+.tool-call.running .tool-status { color: var(--source); animation: blink 1s steps(2, start) infinite; }
+
+.tool-call.reported { border-left-color: var(--output-dim); }
+.tool-call.error { border-left-color: var(--danger); }
+
+.tool-name { color: var(--source); font-weight: 600; flex-shrink: 0; }
+
+.tool-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+}
+
+.tool-meta { margin-left: auto; flex-shrink: 0; color: var(--text-faint); font-size: 9.5px; }
+
+.tool-detail {
+  border-top: 1px solid var(--edge-soft);
+  padding: 6px 8px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+
+.tool-section.args .tool-label { color: var(--source); }
+.tool-section.result .tool-label { color: var(--output); }
+
+.tool-arg + .tool-arg { margin-top: 4px; }
+.tool-arg-name { color: var(--text-muted); }
+
+.tool-section pre {
+  margin: 2px 0 0;
+  padding: 6px 8px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--ink);
+  border-radius: 3px;
+}
+
+.tool-section.args pre { border-left: 2px solid var(--source-wash); }
+.tool-section.result pre { border-left: 2px solid var(--output-wash); }

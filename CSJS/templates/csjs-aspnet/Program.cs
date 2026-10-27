@@ -1,5 +1,5 @@
 // ASP.NET Core host. The browser-side code lives in CsjsClient/ and is transpiled to
-// wwwroot/js by the TranspileCsjs target in the .csproj, so `dotnet run` is all you need.
+// wwwroot/js by CSJS.Build when the client project builds, so `dotnet run` is all you need.
 //
 // Gravicode Studios — led by Kang Fadhil.
 

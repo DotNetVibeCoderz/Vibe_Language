@@ -225,3 +225,105 @@ window.csjsgen.beginResize = function (dotnet, startX, startWidth, growsLeft) {
   window.addEventListener('pointerup', onUp);
   window.addEventListener('pointercancel', onUp);
 };
+
+/**
+ * C# IntelliSense for Monaco.
+ *
+ * The answers come from CSJS.LanguageService running in-process — the same engine behind
+ * `cs2js lsp` — through a MonacoLanguageBridge reference. Each request sends the model's current
+ * text, so .NET never answers against a buffer a keystroke behind what is on screen.
+ *
+ * Providers are registered once per page: Monaco's registrations are global per language, and
+ * registering again on every editor init would show every suggestion twice. A later call only
+ * swaps the .NET reference the providers talk to.
+ */
+window.csjsgen.registerLanguageServices = function (dotnet) {
+  const existing = window.csjsgen._languageServices;
+  if (existing) {
+    existing.dotnet = dotnet;
+    return;
+  }
+
+  const state = { dotnet };
+  window.csjsgen._languageServices = state;
+
+  const languages = monaco.languages;
+  const kinds = languages.CompletionItemKind;
+
+  // A request the .NET side cancelled (a newer one superseded it) rejects; Monaco just wants
+  // "nothing" then, not an error in the console.
+  async function ask(method, ...args) {
+    try {
+      return await state.dotnet.invokeMethodAsync(method, ...args);
+    } catch {
+      return null;
+    }
+  }
+
+  languages.registerCompletionItemProvider('csharp', {
+    triggerCharacters: ['.'],
+
+    async provideCompletionItems(model, position) {
+      const list = await ask('Complete', model.getValue(), position.lineNumber, position.column);
+      if (!list) return { suggestions: [] };
+
+      return {
+        suggestions: list.items.map((item) => ({
+          label: item.label,
+          kind: kinds[item.kind] ?? kinds.Text,
+          insertText: item.insertText,
+          filterText: item.filterText ?? undefined,
+          sortText: item.sortText ?? undefined,
+          detail: item.detail ?? undefined,
+          range: item.range,
+          preselect: item.preselect,
+          // Kept for resolve: details are computed only for the item being looked at.
+          csjs: { resultId: list.resultId, index: item.index },
+        })),
+      };
+    },
+
+    async resolveCompletionItem(item) {
+      if (!item.csjs) return item;
+
+      const details = await ask('ResolveCompletion', item.csjs.resultId, item.csjs.index);
+      if (details?.detail) item.detail = details.detail;
+      if (details?.documentation) item.documentation = { value: details.documentation };
+      return item;
+    },
+  });
+
+  languages.registerHoverProvider('csharp', {
+    async provideHover(model, position) {
+      const hover = await ask('Hover', model.getValue(), position.lineNumber, position.column);
+      if (!hover) return null;
+      return { contents: [{ value: hover.markdown }], range: hover.range };
+    },
+  });
+
+  languages.registerSignatureHelpProvider('csharp', {
+    signatureHelpTriggerCharacters: ['(', ','],
+    signatureHelpRetriggerCharacters: [')'],
+
+    async provideSignatureHelp(model, position) {
+      const help = await ask('SignatureHelp', model.getValue(), position.lineNumber, position.column);
+      if (!help || help.signatures.length === 0) return null;
+
+      return {
+        value: {
+          signatures: help.signatures.map((signature) => ({
+            label: signature.label,
+            documentation: signature.documentation ?? undefined,
+            parameters: signature.parameters.map((parameter) => ({
+              label: parameter.label,
+              documentation: parameter.documentation ?? undefined,
+            })),
+          })),
+          activeSignature: help.activeSignature,
+          activeParameter: help.activeParameter,
+        },
+        dispose() {},
+      };
+    },
+  });
+};

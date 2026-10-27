@@ -1,0 +1,19 @@
+{
+  "name": "csjs-lib-package",
+  "version": "0.1.0",
+  "description": "A JavaScript library written in C# with CSJS.",
+  "type": "module",
+  "exports": {
+    "./Money.js": { "types": "./dist/Money.d.ts", "default": "./dist/Money.js" },
+    "./Text.js": { "types": "./dist/Text.d.ts", "default": "./dist/Text.js" }
+  },
+  "files": [
+    "dist/"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "dotnet build",
+    "test": "dotnet build && node test.mjs",
+    "prepublishOnly": "dotnet build -c Release"
+  }
+}

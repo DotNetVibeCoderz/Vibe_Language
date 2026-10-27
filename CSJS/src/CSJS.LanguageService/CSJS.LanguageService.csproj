@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CSJS.LanguageService</RootNamespace>
+    <AssemblyName>CSJS.LanguageService</AssemblyName>
+    <PackageId>CSJS.LanguageService</PackageId>
+    <Description>C# IntelliSense for CSJS projects — completion, quick info, signature help, go-to-definition, and live CSJS diagnostics — shared by `cs2js lsp` and CSJSGen.</Description>
+  </PropertyGroup>
+
+  <!--
+    Every Roslyn package must agree on one version: Features and Workspaces pin Common and
+    CSharp exactly, so a mismatch with CSJS.Core's compiler reference fails restore outright.
+  -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" Version="5.0.0" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="5.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSJS.Core\CSJS.Core.csproj" />
+    <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
+    <ProjectReference Include="..\CSJS.Testing\CSJS.Testing.csproj" />
+  </ItemGroup>
+
+</Project>

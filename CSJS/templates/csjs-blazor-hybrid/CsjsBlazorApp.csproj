@@ -7,18 +7,22 @@
   </PropertyGroup>
 
   <!--
-    CsjsClient/ holds the browser-side C#. It is transpiled, not compiled into this assembly,
-    so the server build must leave it alone.
+    CsjsClient/ holds the browser-side C#. It has its own project, which CSJS.Build transpiles
+    into wwwroot/js; it must not be compiled into this server assembly as well.
   -->
   <ItemGroup>
     <Compile Remove="CsjsClient/**" />
     <Content Remove="CsjsClient/**" />
-    <None Include="CsjsClient/**" />
+    <None Remove="CsjsClient/**" />
+    <EmbeddedResource Remove="CsjsClient/**" />
   </ItemGroup>
 
-  <Target Name="TranspileCsjs" BeforeTargets="Build">
-    <Message Importance="high" Text="CSJS: transpiling client C# to JavaScript..." />
-    <Exec Command="dotnet cs2js build &quot;$(MSBuildProjectDirectory)/CsjsClient&quot;" ContinueOnError="false" />
-  </Target>
+  <!--
+    Referencing the client project makes it build first, so wwwroot/js is current when the
+    server starts. Its assembly is never loaded — the reference is for ordering only.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="CsjsClient/CsjsBlazorApp.Client.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
 
 </Project>

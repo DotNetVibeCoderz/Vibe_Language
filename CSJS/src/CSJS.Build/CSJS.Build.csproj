@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CSJS.Build: transpile an ordinary .csproj to JavaScript on every `dotnet build`.
+
+    The package carries no library of its own. It ships MSBuild props/targets under build/ and a
+    published copy of the cs2js CLI under tools/, which the targets run with `dotnet exec`. Running
+    the CLI out of process — rather than as an in-proc MSBuild task — is deliberate: Visual Studio
+    hosts MSBuild on .NET Framework with its own Roslyn loaded, and CSJS needs .NET 10 and Roslyn 5.
+
+    The CSJS.Interop dependency flows to the consuming project, so its code compiles against the
+    browser bindings and interop attributes — which is what gives Visual Studio, Rider, and the
+    C# Dev Kit full IntelliSense on CSJS code with no editor extension at all.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <PackageId>CSJS.Build</PackageId>
+    <Description>MSBuild integration for CSJS: `dotnet build` transpiles the project's C# to modern ESNext JavaScript with TypeScript declarations and source maps. CSJS errors appear in the IDE error list, and `dotnet run` serves the result.</Description>
+    <PackageTags>$(PackageTags);msbuild</PackageTags>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <!-- No lib/ folder is intended: the package is build assets plus a dependency. -->
+    <NoWarn>$(NoWarn);NU5100;NU5128</NoWarn>
+    <IncludeSymbols>false</IncludeSymbols>
+    <CsjsCliPublishDir>$(MSBuildProjectDirectory)/$(BaseIntermediateOutputPath)cli/$(Configuration)/</CsjsCliPublishDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
+    <None Include="build\**" Pack="true" PackagePath="build\" />
+    <!-- buildTransitive lets a project that references a CSJS.Build project still transpile. -->
+    <None Include="build\**" Pack="true" PackagePath="buildTransitive\" />
+  </ItemGroup>
+
+  <!-- Publish the CLI and pack it under tools/, where the targets look for it. -->
+  <Target Name="CsjsPackCli" BeforeTargets="_GetPackageFiles">
+    <MSBuild Projects="..\CSJS.Cli\CSJS.Cli.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$([System.IO.Path]::GetFullPath('$(CsjsCliPublishDir)'));UseAppHost=false;SatelliteResourceLanguages=en" />
+    <!-- Metadata is qualified so it batches over the published files only, not every None item. -->
+    <ItemGroup>
+      <_CsjsCliFile Include="$(CsjsCliPublishDir)**\*" />
+      <None Include="@(_CsjsCliFile)" Pack="true"
+            PackagePath="tools\%(_CsjsCliFile.RecursiveDir)%(_CsjsCliFile.Filename)%(_CsjsCliFile.Extension)" />
+    </ItemGroup>
+  </Target>
+
+</Project>

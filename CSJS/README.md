@@ -82,6 +82,9 @@ More in the [documentation gallery](docs/README.md#applications-built-with-csjsg
 ## Install
 
 ```bash
+# Project templates — the quickest start, and no global tool needed
+dotnet new install CSJS.Templates
+
 # The CLI. Install either or both — they differ only in command name.
 dotnet tool install --global CSJS.Cli.Standalone   # gives you  cs2js build
 dotnet tool install --global CSJS.Cli              # gives you  dotnet cs2js build
@@ -93,12 +96,23 @@ dotnet add package CSJS.Core
 ## Start a project
 
 ```bash
-cs2js new HelloWorld
+dotnet new csjs-app -n HelloWorld
 cd HelloWorld
-cs2js serve
+dotnet run
 ```
 
-Then open <http://localhost:5080>.
+Then open <http://localhost:5080>. The project is an ordinary `.csproj` built by
+[`CSJS.Build`](src/CSJS.Build), so Visual Studio, Rider, and VS Code give full IntelliSense and
+CSJS errors land in the IDE error list. The other templates are `csjs-lib` (an npm library with
+`.d.ts` typings), `csjs-aspnet`, `csjs-blazor`, and `csjs-console` — see [templates](templates).
+
+With the CLI instead:
+
+```bash
+cs2js new HelloWorld
+cd HelloWorld
+cs2js serve        # rebuilds on save; the page reloads, CSS swaps in place
+```
 
 ## The CLI
 
@@ -108,7 +122,14 @@ Then open <http://localhost:5080>.
 | `cs2js build [dir]` | Transpile to the output directory. |
 | `cs2js run [dir\|file]` | Build, then execute with Node. |
 | `cs2js watch [dir]` | Rebuild whenever a source file changes. |
-| `cs2js serve [dir]` | Build and serve over HTTP (`--port`, default 5080). |
+| `cs2js serve [dir]` | Build and serve over HTTP with live reload (`--port`, default 5080). |
+| `cs2js build --bundle [--minify]` | One `bundle.js` with only the runtime helpers used, and its source map. |
+| `cs2js add <npm-package>` | Fetch a package and generate C# bindings from its TypeScript declarations. |
+| `cs2js bind <file.d.ts>` | Generate C# bindings from a declaration file. |
+| `cs2js lsp` | Language server: C# IntelliSense with CSJS diagnostics, for any LSP editor. |
+
+Builds are incremental — an unchanged project is skipped, and `watch` re-emits only what changed.
+Node stack traces from `cs2js run` point at your C# lines.
 
 Every project setting has a default, so a project with sources in `src/` builds without a config
 file at all. When you want one, `csjs.json` looks like this:
@@ -127,11 +148,18 @@ file at all. When you want one, `csjs.json` looks like this:
 
 ## What C# is supported
 
-**Supported.** Classes, interfaces, structs, records, enums, generics, inheritance and virtual
-dispatch, properties (auto and computed), indexers, events, delegates, lambdas and closures,
-`async`/`await`, iterators (`yield`), LINQ (method and most query syntax), pattern matching,
-switch expressions, tuples and deconstruction, `using` statements, exception handling with typed
-catch clauses, string interpolation with format specifiers, and operator overloading.
+**Supported, through C# 14.** Classes, interfaces, structs with real value semantics, records,
+enums, generics, inheritance and virtual dispatch, properties (auto, computed, and the `field`
+keyword), indexers, events, delegates, lambdas and closures, `async`/`await`, iterators, LINQ in
+method and full query syntax (`join`, `let`, `group … into`), pattern matching, switch
+expressions, tuples and deconstruction, `ref` and `out` parameters, `checked`/`unchecked`
+arithmetic, extension methods and C# 14 extension members, null-conditional assignment, `using`,
+typed catch clauses, string interpolation with format specifiers, and operator overloading.
+
+The framework surface includes strings, math, collections (`List`, `Dictionary`, `HashSet`,
+`Stack`, `Queue`), the full LINQ operator set, `Regex`, `DateTime` and `TimeSpan`,
+`System.Text.Json`, `StringBuilder`, and the `Enum` APIs. Whole programs are run on .NET and on
+Node in the test suite, and must print the same thing.
 
 **How types map.** This table is the contract — the emitter, the `.d.ts` writer, and the
 IntelliSense provider all read the same table, so they cannot disagree.
@@ -150,9 +178,11 @@ IntelliSense provider all read the same table, so they cannot disagree.
 | `enum` | frozen object, both directions | const object + union type |
 | `record` | class with value equality | class |
 | `DateTime` | `Date` | `Date` |
+| `TimeSpan` | milliseconds | `number` |
+| `struct` | class, cloned wherever C# copies | class with `$clone()` |
 
-**Not supported, and reported rather than mistranslated:** `ref` and `out` parameters on your own
-methods (return a tuple instead), pointers and `unsafe`, and any BCL member without a mapping.
+**Not supported, and reported rather than mistranslated:** pointers and `unsafe`, and any BCL
+member without a mapping.
 That last one matters: an unmapped member is a build error, not JavaScript that fails at runtime.
 
 `lock` compiles with a warning — JavaScript is single-threaded, so the body runs but the lock
@@ -195,26 +225,31 @@ Members of a binding type are camelCased automatically, so `QuerySelector` emits
 | --- | --- |
 | **[`CSJS.Core`](src/CSJS.Core)** | The transpiler: Roslyn front end, JavaScript emitter, `.d.ts` emitter, source maps. |
 | **[`CSJS.Interop`](src/CSJS.Interop)** | Interop attributes and typed browser bindings. |
-| **[`CSJS.Cli`](src/CSJS.Cli)** | `cs2js` — build, run, watch, serve, new. |
+| **[`CSJS.Cli`](src/CSJS.Cli)** | `cs2js` — build, run, watch, serve, new, bind, add, lsp. |
+| **[`CSJS.Build`](src/CSJS.Build)** | MSBuild integration: `dotnet build` transpiles a `.csproj`. |
+| **[`CSJS.LanguageService`](src/CSJS.LanguageService)** | Completion, hover, signature help, definition, and diagnostics — shared by `cs2js lsp` and CSJSGen. |
 | **[`CSJS.Testing`](src/CSJS.Testing)** | Write tests in C#, run them on a JavaScript runtime. |
 | **[`CSJSGen`](src/CSJSGen)** | Desktop editor with **Jack The Code Bender**, an AI assistant. |
 | **[Playground](playground)** | The transpiler running in the browser, via WebAssembly. |
-| **[VS Code extension](vscode-extension)** | Highlighting, IntelliSense, tasks, debugging bridge. |
-| **[Templates](templates)** | Blazor Hybrid, ASP.NET + JS, Console-to-Web. |
+| **[VS Code extension](vscode-extension)** | Language client for `cs2js lsp`, highlighting, tasks, debugging bridge. |
+| **[Templates](templates)** | `CSJS.Templates`: browser app, npm library, ASP.NET + JS, Blazor Hybrid, Console-to-Web. |
+| **[Framework bindings](bindings)** | React, Vue, and Angular, generated from their `.d.ts` by `cs2js add`. |
 | **[Samples](samples)** | Hello world, DOM, events, three.js. |
 
 ## CSJSGen
 
 An Avalonia application whose editor surface is Blazor: a file tree, **Monaco** holding your C#,
 a properties panel, and an output pane showing the emitted JavaScript and `.d.ts` beside the
-source. Panels hide and resize; transpiler errors appear in the editor margin.
+source. Panels hide and resize, and the layout is remembered between sessions; completion, hover,
+signature help, and live diagnostics come from the same language service `cs2js lsp` uses.
 
 **Berkas → Proyek baru** offers 21 templates, from a blank project to a three.js scene. Every one
 is a working application that builds, not a stub.
 
 Beside it sits **Jack The Code Bender** — an assistant built on Semantic Kernel with pluggable
 providers (OpenAI, Azure OpenAI, Anthropic, Gemini, DeepSeek, Ollama). Jack can compile, run, and
-edit the code he writes, because those are kernel functions rather than claims:
+edit the code he writes, because those are kernel functions rather than claims — and each call
+appears in the conversation as a collapsible step, with its arguments and result:
 
 | Function | What it does |
 | --- | --- |
@@ -250,7 +285,9 @@ Full documentation lives in [`docs/`](docs/):
 - [Getting started](docs/getting-started.md)
 - [Language support](docs/language-support.md) — what transpiles, and what each construct becomes
 - [Interop guide](docs/interop.md)
-- [CLI reference](docs/cli.md)
+- [CLI reference](docs/cli.md) — including bundling, live reload, and `CSJS.Build`
+- [Bindings](docs/bindings.md) — generating C# from TypeScript declarations
+- [Language server](docs/language-server.md) — VS Code, Rider, Visual Studio, Neovim
 - [CSJSGen guide](docs/csjsgen.md)
 - [Architecture](docs/architecture.md)
 

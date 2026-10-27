@@ -10,6 +10,49 @@ public sealed partial class JsEmitter
 {
     private void EmitExpression(ExpressionSyntax expression)
     {
+        // The stand-in for a rewritten conditional access's receiver is just its parameter.
+        if (_ctx.StandInName(expression) is { } standIn)
+        {
+            Write(standIn);
+            return;
+        }
+
+        // A char is a one-character string here, but C# promotes it to its UTF-16 code wherever
+        // it takes part in arithmetic or comparison: `c - '0'` is 7 for '7', not NaN.
+        if (IsCharPromotedToNumber(expression))
+        {
+            if (expression is LiteralExpressionSyntax { Token.Value: char literal })
+            {
+                Write(((int)literal).ToString(System.Globalization.CultureInfo.InvariantCulture));
+                return;
+            }
+
+            var simple = expression is IdentifierNameSyntax or MemberAccessExpressionSyntax
+                or ElementAccessExpressionSyntax or InvocationExpressionSyntax or ParenthesizedExpressionSyntax;
+            if (!simple) Write("(");
+            EmitExpressionCore(expression);
+            if (!simple) Write(")");
+            Write(".charCodeAt(0)");
+            return;
+        }
+
+        EmitExpressionCore(expression);
+    }
+
+    private bool IsCharPromotedToNumber(ExpressionSyntax expression)
+    {
+        // A parenthesised char promotes at its outermost position only.
+        if (expression.Parent is ParenthesizedExpressionSyntax) return false;
+
+        var info = _ctx.Model.GetTypeInfo(expression);
+        if (info.Type?.SpecialType != SpecialType.System_Char) return false;
+        return info.ConvertedType is { } converted
+               && converted.SpecialType != SpecialType.System_Char
+               && TypeMap.ShapeOf(converted) is JsShape.Number or JsShape.BigInt;
+    }
+
+    private void EmitExpressionCore(ExpressionSyntax expression)
+    {
         switch (expression)
         {
             case LiteralExpressionSyntax literal: EmitLiteral(literal); break;
@@ -56,6 +99,7 @@ public sealed partial class JsEmitter
             case CheckedExpressionSyntax @checked: EmitExpression(@checked.Expression); break;
             case QueryExpressionSyntax query: EmitQuery(query); break;
             case ImplicitElementAccessSyntax implicitAccess: EmitImplicitElementAccess(implicitAccess); break;
+            case ExpressionSyntax fieldKeyword when fieldKeyword.IsKind(SyntaxKind.FieldExpression): EmitFieldKeyword(fieldKeyword); break;
 
             case BaseObjectCreationExpressionSyntax fallback:
                 EmitObjectCreation(fallback, null);
@@ -86,6 +130,8 @@ public sealed partial class JsEmitter
             Write(")");
             return;
         }
+
+        if (TryEmitStructCopy(expression, target)) return;
 
         EmitExpression(expression);
     }
@@ -166,6 +212,8 @@ public sealed partial class JsEmitter
         // An unqualified member reference is implicitly `this.` or `TypeName.`.
         if (symbol is IFieldSymbol or IPropertySymbol or IMethodSymbol or IEventSymbol)
         {
+            if (TryEmitExtensionPropertyRead(identifier, symbol, null)) return;
+
             if (TryEmitGlobalMember(symbol)) return;
 
             if (MemberMap.Find(symbol) is { } template)
@@ -214,6 +262,8 @@ public sealed partial class JsEmitter
     {
         if (symbol is null || !symbol.IsStatic) return false;
 
+        if (TryEmitImportedMember(symbol)) return true;
+
         var attribute = symbol.GetAttributes()
             .FirstOrDefault(a => a.AttributeClass?.Name == "JsGlobalAttribute");
         if (attribute is null) return false;
@@ -227,11 +277,39 @@ public sealed partial class JsEmitter
         return true;
     }
 
+    /// <summary>
+    /// Emits a static member that is itself a module export — a <c>const</c>, or a function
+    /// referenced as a value — as its import binding.
+    /// <para>
+    /// Invocations already import through <see cref="EmitInvocation"/>; this covers every other
+    /// way of reaching the member. Without it, <c>Lib.Version</c> would emit as a property of a
+    /// container class that does not exist in JavaScript.
+    /// </para>
+    /// </summary>
+    private bool TryEmitImportedMember(ISymbol symbol)
+    {
+        if (symbol is not (IPropertySymbol or IFieldSymbol or IMethodSymbol)) return false;
+        if (GetJsImport(symbol.OriginalDefinition) is not { } import) return false;
+
+        Write(UseMemberImport(symbol.OriginalDefinition, import));
+        return true;
+    }
+
+    /// <summary>Registers a member-level import and returns the local alias to emit.</summary>
+    private string UseMemberImport(ISymbol symbol, JsImportInfo import)
+    {
+        // The alias is a bare identifier, so unlike a member name it must not be a keyword.
+        var alias = NameResolver.LocalName(_ctx.Names.MemberName(symbol));
+        _ctx.UseImport(import.Module, import.IsDefault ? null : import.Export ?? symbol.Name, alias);
+        return alias;
+    }
+
     private void EmitMemberAccess(MemberAccessExpressionSyntax member)
     {
         var symbol = _ctx.SymbolFor(member);
 
         if (TryEmitGlobalMember(symbol)) return;
+        if (TryEmitExtensionPropertyRead(member, symbol, member.Expression)) return;
 
         // A tuple is emitted as an array, so a named element is really an index.
         if (symbol is IFieldSymbol { ContainingType.IsTupleType: true } element
@@ -252,14 +330,14 @@ public sealed partial class JsEmitter
         // A mapped BCL member replaces the whole access, receiver included.
         if (symbol is not null && symbol is not IMethodSymbol && MemberMap.Find(symbol) is { } template)
         {
-            ApplyTemplate(template, () => EmitExpression(member.Expression), Array.Empty<Action>(), member);
+            ApplyTemplate(template, () => EmitExpression(member.Expression), Array.Empty<Action>(), member,
+                receiverIsArray: true, receiverIsFresh: false, resultType: _ctx.TypeFor(member));
             return;
         }
 
-        // An enum member is a property on the frozen enum object.
         if (symbol is IFieldSymbol { ContainingType.TypeKind: TypeKind.Enum } enumMember)
         {
-            Write($"{ReferenceToType(enumMember.ContainingType)}.{enumMember.Name}");
+            EmitEnumMember(enumMember);
             return;
         }
 
@@ -314,24 +392,141 @@ public sealed partial class JsEmitter
         return null;
     }
 
+    /// <summary>
+    /// The receiver of the conditional access being emitted, when it was rewritten into a
+    /// parameter (see <see cref="EmitConditionalAccess"/>). Its bindings read from this instead of
+    /// writing JavaScript's own <c>?.</c>.
+    /// </summary>
+    private ExpressionSyntax? _conditionalReceiver;
+
     private void EmitMemberBinding(MemberBindingExpressionSyntax binding)
     {
         var symbol = _ctx.SymbolFor(binding);
+
+        if (_conditionalReceiver is { } receiver)
+        {
+            if (TryEmitExtensionPropertyRead(binding, symbol, receiver)) return;
+
+            if (symbol is IFieldSymbol { ContainingType.IsTupleType: true } element && TupleElementIndex(element) is { } index)
+            {
+                EmitExpression(receiver);
+                Write($"[{index}]");
+                return;
+            }
+
+            var template = symbol is null ? null
+                : GetJsTemplate(symbol) is { } inline ? new JsTemplate(inline)
+                : symbol is not IMethodSymbol ? MemberMap.Find(symbol) : null;
+            if (template is not null)
+            {
+                ApplyTemplate(template, () => EmitExpression(receiver), Array.Empty<Action>(), binding,
+                    receiverIsArray: true, receiverIsFresh: false, resultType: _ctx.TypeFor(binding));
+                return;
+            }
+
+            if (symbol is not null && symbol is not IMethodSymbol) ReportIfUnmapped(symbol, binding);
+            EmitExpression(receiver);
+            Write(".");
+            Write(symbol is null ? NameResolver.Escape(binding.Name.Identifier.Text) : _ctx.Names.MemberName(symbol));
+            return;
+        }
+
         Write("?.");
         Write(symbol is null ? NameResolver.Escape(binding.Name.Identifier.Text) : _ctx.Names.MemberName(symbol));
     }
 
     private void EmitElementBinding(ElementBindingExpressionSyntax binding)
     {
+        if (_conditionalReceiver is { } receiver)
+        {
+            EmitElementAccessOn(receiver, binding.ArgumentList.Arguments, binding);
+            return;
+        }
+
         Write("?.[");
         WriteJoined(binding.ArgumentList.Arguments, a => EmitExpression(a.Expression));
         Write("]");
     }
 
+    /// <summary>
+    /// <c>a?.B</c>. JavaScript's own <c>?.</c> is used whenever the member exists on the JavaScript
+    /// object under its emitted name. When it does not — a mapped BCL member, an extension method,
+    /// a dictionary index — the member is really a rewrite around its receiver, so the receiver
+    /// becomes a parameter: <c>((r) =&gt; r == null ? null : Ext.M(r))(a)</c>. That evaluates
+    /// <c>a</c> once and yields C#'s null, not undefined, when it is null.
+    /// </summary>
     private void EmitConditionalAccess(ConditionalAccessExpressionSyntax conditional)
     {
-        EmitExpression(conditional.Expression);
+        if (TryEmitNullConditionalAssignment(conditional)) return;
+
+        var previous = _conditionalReceiver;
+
+        if (!NeedsReceiverRewrite(conditional))
+        {
+            // The receiver belongs to whatever encloses this access; the bindings here are native.
+            EmitExpression(conditional.Expression);
+            _conditionalReceiver = null;
+            EmitExpression(conditional.WhenNotNull);
+            _conditionalReceiver = previous;
+            return;
+        }
+
+        var name = _ctx.NextTemporary("r");
+        Write($"(({name}) => {name} == null ? null : ");
+        _conditionalReceiver = _ctx.CreateStandIn(conditional.Expression, name);
+        var needsParens = conditional.WhenNotNull is AssignmentExpressionSyntax;
+        if (needsParens) Write("(");
         EmitExpression(conditional.WhenNotNull);
+        if (needsParens) Write(")");
+        _conditionalReceiver = previous;
+        Write(")(");
+        EmitExpression(conditional.Expression);
+        Write(")");
+    }
+
+    /// <summary>True when the member right after <c>?.</c> has no native JavaScript counterpart.</summary>
+    private bool NeedsReceiverRewrite(ConditionalAccessExpressionSyntax conditional)
+    {
+        ExpressionSyntax? node = conditional.WhenNotNull;
+        while (true)
+        {
+            switch (node)
+            {
+                case InvocationExpressionSyntax invocation: node = invocation.Expression; continue;
+                case MemberAccessExpressionSyntax access: node = access.Expression; continue;
+                case ElementAccessExpressionSyntax element: node = element.Expression; continue;
+                case PostfixUnaryExpressionSyntax postfix: node = postfix.Operand; continue;
+            }
+            break;
+        }
+
+        switch (node)
+        {
+            case MemberBindingExpressionSyntax binding:
+                return _ctx.SymbolFor(binding) switch
+                {
+                    IMethodSymbol { MethodKind: MethodKind.DelegateInvoke } => false,
+                    IMethodSymbol method => method.ReducedFrom is not null
+                                            || method.ContainingType?.IsExtension == true
+                                            || MemberMap.RequiresMapping(method.ReducedFrom ?? method)
+                                            || GetJsTemplate(method) is not null,
+                    ISymbol member when member is IPropertySymbol or IFieldSymbol => member.ContainingType?.IsExtension == true
+                                            || MemberMap.Find(member) is not null
+                                            || GetJsTemplate(member) is not null
+                                            || member is IFieldSymbol { ContainingType.IsTupleType: true },
+                    _ => false,
+                };
+
+            case ElementBindingExpressionSyntax element:
+                var receiverType = _ctx.TypeFor(conditional.Expression);
+                return TypeMap.ShapeOf(receiverType) == JsShape.Map
+                       || _ctx.SymbolFor(element) is IPropertySymbol { IsIndexer: true } indexer && !IsMappedIndexer(indexer)
+                       || element.ArgumentList.Arguments.Any(a => a.Expression is RangeExpressionSyntax
+                           or PrefixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.IndexExpression });
+
+            default:
+                return false;
+        }
     }
 
     private void EmitInvocation(InvocationExpressionSyntax invocation)
@@ -357,6 +552,7 @@ public sealed partial class JsEmitter
         }
 
         if (TryEmitSpecialInvocation(invocation, symbol)) return;
+        if (TryEmitExtensionMemberInvocation(invocation, symbol)) return;
         if (TryEmitDelegateInvoke(invocation, symbol)) return;
 
         var receiver = GetReceiver(invocation.Expression);
@@ -374,20 +570,21 @@ public sealed partial class JsEmitter
 
         if (MemberMap.Find(symbol) is { } template)
         {
-            var arguments = BuildArgumentEmitters(invocation.ArgumentList.Arguments, symbol);
+            var arguments = BuildArgumentEmitters(invocation.ArgumentList.Arguments, symbol, template.StringifyArguments,
+                spreadParams: template.Pattern.Contains("{...", StringComparison.Ordinal));
             ApplyTemplate(template,
                 receiver is null ? null : () => EmitExpression(receiver),
                 arguments,
                 invocation,
-                receiverIsArray: receiver is not null && ProducesJsArray(receiver));
+                receiverIsArray: receiver is not null && ProducesJsArray(receiver),
+                receiverIsFresh: receiver is not null && ProducesFreshArray(receiver),
+                resultType: symbol.ReturnType);
             return;
         }
 
-        if (GetJsImport(symbol) is { } import)
+        if (GetJsImport(symbol.OriginalDefinition) is { } import)
         {
-            var alias = _ctx.Names.MemberName(symbol);
-            _ctx.UseImport(import.Module, import.IsDefault ? null : import.Export ?? symbol.Name, alias);
-            Write(alias);
+            Write(UseMemberImport(symbol.OriginalDefinition, import));
             Write("(");
             EmitArgumentList(invocation.ArgumentList.Arguments, symbol);
             Write(")");
@@ -397,6 +594,9 @@ public sealed partial class JsEmitter
         // An extension method is a static call with the receiver moved into first position.
         if (symbol.IsExtensionMethod && symbol.ReducedFrom is not null && receiver is not null)
         {
+            // A framework extension with no mapping has no class to call in JavaScript.
+            ReportIfUnmapped(symbol.ReducedFrom, invocation);
+
             Write($"{ReferenceToType(symbol.ContainingType)}.{_ctx.Names.MemberName(symbol)}(");
             EmitExpression(receiver);
             if (invocation.ArgumentList.Arguments.Count > 0)
@@ -453,7 +653,12 @@ public sealed partial class JsEmitter
                 return;
 
             case MemberBindingExpressionSyntax:
-                Write("?.");
+                if (_conditionalReceiver is { } receiver)
+                {
+                    EmitExpression(receiver);
+                    Write(".");
+                }
+                else Write("?.");
                 Write(_ctx.Names.MemberName(symbol));
                 return;
 
@@ -569,7 +774,9 @@ public sealed partial class JsEmitter
         }
 
         // int.TryParse(text, out value) and double.TryParse(text, out value)
-        if (symbol.Name == "TryParse" && arguments.Count == 2)
+        if (symbol.Name == "TryParse" && arguments.Count == 2 && MemberMap.RequiresMapping(symbol)
+            && owner is "System.Int32" or "System.Int16" or "System.Byte" or "System.Double"
+                or "System.Single" or "System.Decimal" or "System.UInt32")
         {
             var parser = owner is "System.Double" or "System.Single" or "System.Decimal" ? "parseFloat" : "parseInt";
             var radix = parser == "parseInt" ? ", 10" : "";
@@ -581,19 +788,115 @@ public sealed partial class JsEmitter
             return true;
         }
 
-        // A user-declared method with by-reference parameters cannot be modelled faithfully.
+        // queue.TryDequeue(out x), stack.TryPop(out x), and their Peek variants.
+        if (owner is "System.Collections.Generic.Queue" or "System.Collections.Generic.Stack"
+            && symbol.Name is "TryDequeue" or "TryPop" or "TryPeek" && arguments.Count == 1)
+        {
+            var receiver = GetReceiver(invocation.Expression);
+            if (receiver is null) return false;
+            Write("(");
+            EmitExpression(receiver);
+            Write(".length > 0 ? (");
+            EmitOutTarget(arguments[0]);
+            Write(" = ");
+            EmitExpression(receiver);
+            Write(symbol.Name == "TryPeek" ? "[0]" : ".shift()");
+            Write(", true) : (");
+            EmitOutTarget(arguments[0]);
+            Write($" = {DefaultValueFor(symbol.Parameters[0].Type)}, false))");
+            return true;
+        }
+
+        if (TryEmitEnumInvocation(invocation, symbol, owner)) return true;
+        if (TryEmitJsonInvocation(invocation, symbol, owner)) return true;
+
+        // OfType<T>() filters by a runtime type test, which needs T — a template cannot see it.
+        if (owner == "System.Linq.Enumerable" && symbol.Name == "OfType" && symbol.TypeArguments.Length == 1)
+        {
+            var receiver = GetReceiver(invocation.Expression) ?? arguments.FirstOrDefault()?.Expression;
+            if (receiver is null) return false;
+            var item = _ctx.NextTemporary("x");
+            if (ProducesJsArray(receiver)) EmitExpression(receiver);
+            else
+            {
+                Write("[...");
+                EmitExpression(receiver);
+                Write("]");
+            }
+            Write($".filter(({item}) => ");
+            EmitTypeTest(() => Write(item), symbol.TypeArguments[0], invocation);
+            Write(")");
+            return true;
+        }
+
         if (symbol.Parameters.Any(p => p.RefKind is RefKind.Out or RefKind.Ref)
             && symbol.ContainingType?.ContainingAssembly?.Name != "CSJS.Interop")
         {
+            // A method declared in this program hands its ref/out values back in its result.
+            if (symbol.DeclaringSyntaxReferences.Length > 0
+                && symbol.MethodKind is MethodKind.Ordinary or MethodKind.LocalFunction)
+            {
+                EmitByRefCall(invocation, symbol);
+                return true;
+            }
+
             _ctx.Error(DiagnosticIds.UnsupportedMember,
-                $"'{symbol.Name}' uses ref/out parameters, which have no JavaScript equivalent. " +
-                "Return a tuple or an object instead.", invocation);
+                $"'{symbol.Name}' uses ref/out parameters and has no JavaScript mapping. " +
+                "Methods declared in your own code support ref and out; framework ones need a mapping.",
+                invocation);
             Write("undefined");
             return true;
         }
 
         return false;
     }
+
+    /// <summary>
+    /// Calls a method rewritten by <see cref="EmitFunctionBody"/>: the result is a tuple whose
+    /// first element is the return value and whose rest are the final ref/out values, which are
+    /// written back into the variables the caller passed.
+    /// </summary>
+    private void EmitByRefCall(InvocationExpressionSyntax invocation, IMethodSymbol symbol)
+    {
+        var result = _ctx.NextTemporary("r");
+        var ordered = OrderArguments(invocation.ArgumentList.Arguments, symbol);
+
+        Write($"(({result}) => (");
+        var position = 1;
+        foreach (var parameter in symbol.Parameters.Where(p => p.RefKind is RefKind.Ref or RefKind.Out))
+        {
+            var slot = position++;
+            var argument = ordered.FirstOrDefault(pair => SymbolEqualityComparer.Default.Equals(pair.Parameter, parameter)).Argument;
+            if (argument?.Expression is null || IsDiscard(argument.Expression)) continue;
+
+            EmitOutTarget(argument);
+            Write($" = {result}[{slot}], ");
+        }
+        Write($"{result}[0]))(");
+
+        var receiver = GetReceiver(invocation.Expression);
+        if (symbol.IsExtensionMethod && symbol.ReducedFrom is not null && receiver is not null)
+        {
+            Write($"{ReferenceToType(symbol.ContainingType)}.{_ctx.Names.MemberName(symbol)}(");
+            EmitExpression(receiver);
+            if (invocation.ArgumentList.Arguments.Count > 0) Write(", ");
+        }
+        else
+        {
+            EmitInvocationTarget(invocation.Expression, symbol);
+            Write("(");
+        }
+
+        EmitArgumentList(invocation.ArgumentList.Arguments, symbol, skipOut: true);
+        Write("))");
+    }
+
+    private bool IsDiscard(ExpressionSyntax expression) => expression switch
+    {
+        DeclarationExpressionSyntax { Designation: DiscardDesignationSyntax } => true,
+        IdentifierNameSyntax { Identifier.Text: "_" } => _ctx.SymbolFor(expression) is null or IDiscardSymbol,
+        _ => false,
+    };
 
     private void EmitOutTarget(ArgumentSyntax argument)
     {
@@ -645,17 +948,21 @@ public sealed partial class JsEmitter
     private ExpressionSyntax? GetReceiver(ExpressionSyntax invocationTarget) => invocationTarget switch
     {
         MemberAccessExpressionSyntax member => member.Expression,
-        MemberBindingExpressionSyntax => null,
+        // Inside a rewritten `a?.M()`, the binding's receiver is the stand-in for `a`.
+        MemberBindingExpressionSyntax => _conditionalReceiver,
         _ => null,
     };
 
-    private void EmitArgumentList(SeparatedSyntaxList<ArgumentSyntax> arguments, IMethodSymbol? target = null)
+    private void EmitArgumentList(
+        SeparatedSyntaxList<ArgumentSyntax> arguments, IMethodSymbol? target = null, bool skipOut = false)
     {
         var ordered = OrderArguments(arguments, target);
         var first = true;
 
         foreach (var (argument, parameter) in ordered)
         {
+            if (skipOut && parameter?.RefKind == RefKind.Out) continue;
+
             if (!first) Write(", ");
             first = false;
 
@@ -666,6 +973,10 @@ public sealed partial class JsEmitter
             }
 
             if (argument.Expression is null) Write(DefaultValueFor(parameter?.Type));
+            // By reference means the same storage, so a struct must not be copied on the way in.
+            else if (argument.RefKindKeyword.Kind() is SyntaxKind.RefKeyword or SyntaxKind.InKeyword
+                     || parameter?.RefKind is RefKind.Ref or RefKind.In or RefKind.RefReadOnlyParameter)
+                EmitExpression(argument.Expression);
             else EmitExpressionAs(argument.Expression, parameter?.Type);
         }
     }
@@ -743,14 +1054,38 @@ public sealed partial class JsEmitter
         };
     }
 
-    private List<Action> BuildArgumentEmitters(SeparatedSyntaxList<ArgumentSyntax> arguments, IMethodSymbol? target)
+    private List<Action> BuildArgumentEmitters(
+        SeparatedSyntaxList<ArgumentSyntax> arguments, IMethodSymbol? target, bool stringify = false, bool spreadParams = false)
         => OrderArguments(arguments, target)
             .Select(pair => (Action)(() =>
             {
+                // An array handed to a params parameter in non-expanded form is the whole
+                // argument list, so a `[{...}]` template must receive its elements, not the array.
+                var spread = spreadParams && pair.Parameter?.IsParams == true && pair.Argument.Expression is not null
+                             && _ctx.TypeFor(pair.Argument.Expression) is IArrayTypeSymbol
+                             && arguments.Count == target!.Parameters.Length;
+                if (spread) Write("...");
+
                 if (pair.Argument.Expression is null) Write(DefaultValueFor(pair.Parameter?.Type));
+                // A spread array is the argument list itself; its elements are converted where used.
+                else if (stringify && !spread) EmitStringified(pair.Argument.Expression);
                 else EmitExpressionAs(pair.Argument.Expression, pair.Parameter?.Type);
             }))
             .ToList();
+
+    /// <summary>
+    /// True when an expression evaluates to an array nothing else holds a reference to, so a
+    /// template that must hand back a copy (<c>ToList</c>) can use it as it is. Every LINQ call
+    /// builds a new array, except the pass-throughs that return their receiver.
+    /// </summary>
+    private static readonly System.Text.RegularExpressions.Regex HelperReference =
+        new(@"\bcsjs[A-Z]\w*(?=\()", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private bool ProducesFreshArray(ExpressionSyntax expression)
+        => expression is InvocationExpressionSyntax invocation
+           && _ctx.SymbolFor(invocation) is IMethodSymbol { ContainingType: { } owner } method
+           && TypeMap.Unbound(owner) == "System.Linq.Enumerable"
+           && method.Name is not ("AsEnumerable" or "Cast");
 
     /// <summary>
     /// Renders a <see cref="JsTemplate"/>, substituting the receiver and arguments.
@@ -765,10 +1100,17 @@ public sealed partial class JsEmitter
         Action? emitThis,
         IReadOnlyList<Action> emitArgs,
         SyntaxNode site,
-        bool receiverIsArray)
+        bool receiverIsArray,
+        bool receiverIsFresh = false,
+        ITypeSymbol? resultType = null)
     {
         if (template.Helper is not null)
             _ctx.UseHelper(template.Helper);
+
+        // A pattern may call more than the one helper it names — csjsRegexReplace(csjsRegex(…))
+        // — and every one of them needs an import, or the module throws a ReferenceError.
+        foreach (System.Text.RegularExpressions.Match helper in HelperReference.Matches(template.Pattern))
+            _ctx.UseHelper(helper.Value);
 
         var pattern = template.Pattern;
         var i = 0;
@@ -807,6 +1149,21 @@ public sealed partial class JsEmitter
                 if (emitThis is not null) emitThis();
                 else Write(_thisAlias ?? "this");
                 if (!receiverIsArray) Write("]");
+                continue;
+            }
+
+            if (token == "copy")
+            {
+                if (!receiverIsFresh) Write("[...");
+                if (emitThis is not null) emitThis();
+                else Write(_thisAlias ?? "this");
+                if (!receiverIsFresh) Write("]");
+                continue;
+            }
+
+            if (token == "default")
+            {
+                Write(DefaultValueFor(resultType));
                 continue;
             }
 
@@ -875,10 +1232,22 @@ public sealed partial class JsEmitter
 
                 case JsShape.Array:
                     Write("[");
-                    WriteJoined(initializer.Expressions, EmitExpression);
+                    WriteJoined(initializer.Expressions, EmitValue);
                     Write("]");
                     return;
             }
+        }
+
+        // `new Dictionary<K,V> { ["a"] = 1 }` is an object initializer in C#'s grammar — index
+        // initializers are — but for a Map every entry is a key, not a property.
+        if (shape == JsShape.Map
+            && initializer is { RawKind: (int)SyntaxKind.ObjectInitializerExpression, Expressions.Count: > 0 }
+            && initializer.Expressions.All(e => e is AssignmentExpressionSyntax { Left: ImplicitElementAccessSyntax }))
+        {
+            Write("new Map([");
+            WriteJoined(initializer.Expressions, EmitMapEntry);
+            Write("])");
+            return;
         }
 
         var hasObjectInitializer = initializer is not null
@@ -925,6 +1294,13 @@ public sealed partial class JsEmitter
         if (type is not null && IsFrameworkException(type))
         {
             EmitFrameworkExceptionConstruction(creation, type);
+            return;
+        }
+
+        // `new S()` with no constructor of S's own is default(S): every field zeroed.
+        if (symbol is { IsImplicitlyDeclared: true, Parameters.Length: 0 } && IsDeclaredStruct(type))
+        {
+            Write($"{ReferenceToType(type!)}.$default()");
             return;
         }
 
@@ -1090,7 +1466,7 @@ public sealed partial class JsEmitter
             var name = member is null ? assignment.Left.ToString() : _ctx.Names.MemberName(member);
             Write(NameResolver.IsValidPropertyKey(name) ? name : QuoteString(name));
             Write(": ");
-            EmitExpression(assignment.Right);
+            EmitExpressionAs(assignment.Right, _ctx.TypeFor(assignment.Left));
         }
         Write(" }");
     }
@@ -1103,7 +1479,7 @@ public sealed partial class JsEmitter
                 Write("[");
                 EmitExpression(pair.Expressions[0]);
                 Write(", ");
-                EmitExpression(pair.Expressions[1]);
+                EmitValue(pair.Expressions[1]);
                 Write("]");
                 return;
 
@@ -1111,7 +1487,7 @@ public sealed partial class JsEmitter
                 Write("[");
                 WriteJoined(key.ArgumentList.Arguments, a => EmitExpression(a.Expression));
                 Write(", ");
-                EmitExpression(assignment.Right);
+                EmitValue(assignment.Right);
                 Write("]");
                 return;
 
@@ -1141,6 +1517,15 @@ public sealed partial class JsEmitter
             return;
         }
 
+        // fill() would put one shared instance in every slot; each struct element is its own value.
+        if (IsDeclaredStruct(elementType))
+        {
+            Write("Array.from({ length: ");
+            EmitExpression(size);
+            Write($" }}, () => {DefaultValueFor(elementType)})");
+            return;
+        }
+
         Write("new Array(");
         EmitExpression(size);
         Write($").fill({DefaultValueFor(elementType)})");
@@ -1149,7 +1534,7 @@ public sealed partial class JsEmitter
     private void EmitInitializer(InitializerExpressionSyntax initializer)
     {
         Write("[");
-        WriteJoined(initializer.Expressions, EmitExpression);
+        WriteJoined(initializer.Expressions, EmitValue);
         Write("]");
     }
 
@@ -1161,7 +1546,7 @@ public sealed partial class JsEmitter
             switch (element)
             {
                 case ExpressionElementSyntax expressionElement:
-                    EmitExpression(expressionElement.Expression);
+                    EmitValue(expressionElement.Expression);
                     break;
                 case SpreadElementSyntax spread:
                     Write("...");
@@ -1184,7 +1569,7 @@ public sealed partial class JsEmitter
 
             Write(NameResolver.IsValidPropertyKey(name) ? name : QuoteString(name));
             Write(": ");
-            EmitExpression(initializer.Expression);
+            EmitValue(initializer.Expression);
         });
         Write(" }");
     }
@@ -1204,7 +1589,7 @@ public sealed partial class JsEmitter
     {
         // C# tuples become arrays, which destructure identically on the JavaScript side.
         Write("[");
-        WriteJoined(tuple.Arguments, a => EmitExpression(a.Expression));
+        WriteJoined(tuple.Arguments, a => EmitValue(a.Expression));
         Write("]");
     }
 
@@ -1231,6 +1616,25 @@ public sealed partial class JsEmitter
             Write(")");
             return;
         }
+
+        // A framework operator with a mapping (DateTime - DateTime, DateTime + TimeSpan) has no
+        // JavaScript operator that means the same thing: Date + number concatenates.
+        if (symbol is { MethodKind: MethodKind.UserDefinedOperator } frameworkOperator
+            && MemberMap.Find(frameworkOperator) is { } operatorTemplate)
+        {
+            ApplyTemplate(operatorTemplate, null,
+                new Action[] { () => EmitExpression(binary.Left), () => EmitExpression(binary.Right) }, binary);
+            return;
+        }
+
+        if (binary.IsKind(SyntaxKind.AddExpression)
+            && _ctx.TypeFor(binary)?.SpecialType == SpecialType.System_String)
+        {
+            EmitStringConcatenation(binary);
+            return;
+        }
+
+        if (TryEmitOverflowAwareArithmetic(binary)) return;
 
         switch (binary.Kind())
         {
@@ -1303,6 +1707,163 @@ public sealed partial class JsEmitter
         EmitExpression(binary.Right);
     }
 
+    /// <summary>
+    /// String concatenation converts each operand the way C# does: an enum by name, a bool as
+    /// <c>True</c>, null as nothing. JavaScript's <c>+</c> would write <c>1</c>, <c>true</c>, and
+    /// <c>null</c> into the middle of the string.
+    /// </summary>
+    private void EmitStringConcatenation(BinaryExpressionSyntax binary)
+    {
+        EmitStringified(binary.Left);
+        Write(" + ");
+        EmitStringified(binary.Right);
+    }
+
+    private enum OverflowMode { Default, Checked, Unchecked }
+
+    /// <summary>
+    /// The overflow context of an operation: the nearest enclosing <c>checked</c> or
+    /// <c>unchecked</c> expression or block, else the project default.
+    /// </summary>
+    private OverflowMode OverflowContextOf(SyntaxNode node)
+    {
+        foreach (var ancestor in node.AncestorsAndSelf())
+        {
+            switch (ancestor)
+            {
+                case CheckedExpressionSyntax expression:
+                    return expression.IsKind(SyntaxKind.CheckedExpression) ? OverflowMode.Checked : OverflowMode.Unchecked;
+                case CheckedStatementSyntax statement:
+                    return statement.IsKind(SyntaxKind.CheckedStatement) ? OverflowMode.Checked : OverflowMode.Unchecked;
+                case MemberDeclarationSyntax:
+                    return _ctx.Options.CheckOverflow ? OverflowMode.Checked : OverflowMode.Default;
+            }
+        }
+        return _ctx.Options.CheckOverflow ? OverflowMode.Checked : OverflowMode.Default;
+    }
+
+    /// <summary>The <c>csjsChecked</c> range name for an integral type, or null for any other.</summary>
+    private static string? IntegralKind(ITypeSymbol? type) => type?.SpecialType switch
+    {
+        SpecialType.System_SByte => "sbyte",
+        SpecialType.System_Byte => "byte",
+        SpecialType.System_Int16 => "short",
+        SpecialType.System_UInt16 => "ushort",
+        SpecialType.System_Int32 => "int",
+        SpecialType.System_UInt32 => "uint",
+        SpecialType.System_Int64 => "long",
+        SpecialType.System_UInt64 => "ulong",
+        _ => null,
+    };
+
+    /// <summary>
+    /// Integer <c>+</c>, <c>-</c>, and <c>*</c> inside a <c>checked</c> or <c>unchecked</c> context.
+    /// <para>
+    /// <c>checked</c> throws <c>OverflowException</c> when the result leaves the type's range.
+    /// <c>unchecked</c> wraps to the type's width, as C# does: <c>int.MaxValue + 1</c> is
+    /// <c>int.MinValue</c>. Outside either, arithmetic is emitted as written — doubles hold every
+    /// 32-bit result exactly, and wrapping every addition would bury the output in <c>| 0</c>.
+    /// </para>
+    /// </summary>
+    private bool TryEmitOverflowAwareArithmetic(BinaryExpressionSyntax binary)
+    {
+        var op = binary.Kind() switch
+        {
+            SyntaxKind.AddExpression => "+",
+            SyntaxKind.SubtractExpression => "-",
+            SyntaxKind.MultiplyExpression => "*",
+            _ => null,
+        };
+        if (op is null) return false;
+
+        var kind = IntegralKind(_ctx.TypeFor(binary));
+        if (kind is null) return false;
+
+        switch (OverflowContextOf(binary))
+        {
+            case OverflowMode.Checked:
+                _ctx.UseHelper("csjsChecked");
+                Write("csjsChecked(");
+                EmitBinaryOperands(binary, op);
+                Write($", '{kind}')");
+                return true;
+
+            case OverflowMode.Unchecked:
+                EmitWrapped(kind, () =>
+                {
+                    // Math.imul multiplies as 32-bit integers; a double product of two large ints
+                    // has already lost the low bits that wrapping needs.
+                    if (op == "*" && kind is "int" or "uint")
+                    {
+                        Write("Math.imul(");
+                        EmitExpression(binary.Left);
+                        Write(", ");
+                        EmitExpression(binary.Right);
+                        Write(")");
+                    }
+                    else
+                    {
+                        EmitBinaryOperands(binary, op);
+                    }
+                });
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    /// <summary>Wraps a value to the width of an integral type, as unchecked C# arithmetic does.</summary>
+    private void EmitWrapped(string kind, Action emitValue)
+    {
+        switch (kind)
+        {
+            case "int":
+                Write("((");
+                emitValue();
+                Write(") | 0)");
+                return;
+            case "uint":
+                Write("((");
+                emitValue();
+                Write(") >>> 0)");
+                return;
+            case "short":
+                Write("((");
+                emitValue();
+                Write(") << 16 >> 16)");
+                return;
+            case "ushort":
+                Write("((");
+                emitValue();
+                Write(") & 0xFFFF)");
+                return;
+            case "sbyte":
+                Write("((");
+                emitValue();
+                Write(") << 24 >> 24)");
+                return;
+            case "byte":
+                Write("((");
+                emitValue();
+                Write(") & 0xFF)");
+                return;
+            case "long":
+                Write("BigInt.asIntN(64, ");
+                emitValue();
+                Write(")");
+                return;
+            case "ulong":
+                Write("BigInt.asUintN(64, ");
+                emitValue();
+                Write(")");
+                return;
+            default:
+                emitValue();
+                return;
+        }
+    }
+
     private void EmitEquality(BinaryExpressionSyntax binary, bool negated)
     {
         var leftType = _ctx.TypeFor(binary.Left);
@@ -1333,7 +1894,7 @@ public sealed partial class JsEmitter
         if (type.IsRecord) return true;
         // A DateTime compares by value in C# but by reference as a JavaScript Date.
         return type is INamedTypeSymbol named && TypeMap.Unbound(named)
-            is "System.DateTime" or "System.DateTimeOffset" or "System.TimeSpan";
+            is "System.DateTime" or "System.DateTimeOffset";
     }
 
     private bool IsIntegerDivision(BinaryExpressionSyntax binary)
@@ -1521,7 +2082,7 @@ public sealed partial class JsEmitter
             Write(".set(");
             WriteJoined(mapAccess.ArgumentList.Arguments, a => EmitExpression(a.Expression));
             Write(", ");
-            EmitExpression(assignment.Right);
+            EmitExpressionAs(assignment.Right, _ctx.TypeFor(assignment.Left));
             Write(")");
             return;
         }
@@ -1584,6 +2145,29 @@ public sealed partial class JsEmitter
         var target = _ctx.Model.GetTypeInfo(cast.Type).Type;
         var source = _ctx.TypeFor(cast.Expression);
 
+        // char <-> number: a char is a one-character string here, so the conversion is explicit.
+        if (target?.SpecialType == SpecialType.System_Char && source is not null
+            && source.SpecialType != SpecialType.System_Char && TypeMap.ShapeOf(source) is JsShape.Number or JsShape.BigInt)
+        {
+            Write("String.fromCharCode(");
+            if (TypeMap.IsBigInt(source)) Write("Number(");
+            EmitExpression(cast.Expression);
+            if (TypeMap.IsBigInt(source)) Write(")");
+            Write(")");
+            return;
+        }
+
+        if (source?.SpecialType == SpecialType.System_Char && target is not null
+            && target.SpecialType != SpecialType.System_Char && TypeMap.ShapeOf(target) is JsShape.Number or JsShape.BigInt)
+        {
+            if (TypeMap.IsBigInt(target)) Write("BigInt(");
+            EmitCharCode(cast.Expression);
+            if (TypeMap.IsBigInt(target)) Write(")");
+            return;
+        }
+
+        if (TryEmitIntegralConversion(cast, source, target)) return;
+
         // Narrowing a floating-point value to an integer truncates in C#.
         if (TypeMap.IsIntegral(target) && source is not null && !TypeMap.IsIntegral(source)
             && TypeMap.ShapeOf(source) == JsShape.Number)
@@ -1620,6 +2204,119 @@ public sealed partial class JsEmitter
 
         // Reference conversions carry no runtime cost in JavaScript.
         EmitExpression(cast.Expression);
+    }
+
+    private void EmitCharCode(ExpressionSyntax expression)
+    {
+        if (expression is LiteralExpressionSyntax { Token.Value: char literal })
+        {
+            Write(((int)literal).ToString(System.Globalization.CultureInfo.InvariantCulture));
+            return;
+        }
+
+        var simple = expression is IdentifierNameSyntax or MemberAccessExpressionSyntax
+            or ElementAccessExpressionSyntax or InvocationExpressionSyntax or ParenthesizedExpressionSyntax;
+        if (!simple) Write("(");
+        EmitExpression(expression);
+        if (!simple) Write(")");
+        Write(".charCodeAt(0)");
+    }
+
+    /// <summary>
+    /// An explicit integral conversion that can lose information: <c>(byte)300</c> is 44 in C#.
+    /// Under <c>checked</c> it throws instead. Conversions that always fit cost nothing.
+    /// </summary>
+    private bool TryEmitIntegralConversion(CastExpressionSyntax cast, ITypeSymbol? source, ITypeSymbol? target)
+    {
+        var targetKind = IntegralKind(target);
+        if (targetKind is null || source is null || target is null) return false;
+
+        var sourceIsIntegral = IntegralKind(source) is not null || source.TypeKind == TypeKind.Enum;
+        var sourceIsFloating = source.SpecialType is SpecialType.System_Double or SpecialType.System_Single
+            or SpecialType.System_Decimal;
+        if (!sourceIsIntegral && !sourceIsFloating) return false;
+
+        var mode = OverflowContextOf(cast);
+        var sourceIsBig = TypeMap.IsBigInt(source);
+        var targetIsBig = TypeMap.IsBigInt(target);
+
+        void EmitConvertedValue()
+        {
+            // Cross the Number/BigInt boundary first; truncate a fraction, as every cast does.
+            if (targetIsBig && !sourceIsBig)
+            {
+                Write("BigInt(");
+                if (sourceIsFloating) Write("Math.trunc(");
+                EmitExpression(cast.Expression);
+                if (sourceIsFloating) Write(")");
+                Write(")");
+            }
+            else if (sourceIsFloating)
+            {
+                Write("Math.trunc(");
+                EmitExpression(cast.Expression);
+                Write(")");
+            }
+            else
+            {
+                EmitExpression(cast.Expression);
+            }
+        }
+
+        if (mode == OverflowMode.Checked)
+        {
+            if (FitsWithin(source, target)) return false;
+            _ctx.UseHelper("csjsChecked");
+            if (sourceIsBig && !targetIsBig)
+            {
+                // Range-check as BigInt so a huge long is caught before Number() can round it.
+                Write("Number(csjsChecked(");
+                EmitExpression(cast.Expression);
+                Write($", '{targetKind}'))");
+                return true;
+            }
+            Write("csjsChecked(");
+            EmitConvertedValue();
+            Write($", '{targetKind}')");
+            return true;
+        }
+
+        if (FitsWithin(source, target) || sourceIsFloating) return false;
+
+        // BigInt narrows with asIntN; a Number narrows with bit operations.
+        if (sourceIsBig && !targetIsBig)
+        {
+            var bits = targetKind switch { "sbyte" or "byte" => 8, "short" or "ushort" => 16, _ => 32 };
+            var signed = targetKind is "sbyte" or "short" or "int";
+            Write($"Number(BigInt.as{(signed ? "Int" : "Uint")}N({bits}, ");
+            EmitExpression(cast.Expression);
+            Write("))");
+            return true;
+        }
+
+        EmitWrapped(targetKind, EmitConvertedValue);
+        return true;
+    }
+
+    /// <summary>True when every value of <paramref name="source"/> is representable in <paramref name="target"/>.</summary>
+    private static bool FitsWithin(ITypeSymbol source, ITypeSymbol target)
+    {
+        static (decimal Min, decimal Max)? RangeOf(ITypeSymbol type) => type.SpecialType switch
+        {
+            SpecialType.System_SByte => (sbyte.MinValue, sbyte.MaxValue),
+            SpecialType.System_Byte => (byte.MinValue, byte.MaxValue),
+            SpecialType.System_Int16 => (short.MinValue, short.MaxValue),
+            SpecialType.System_UInt16 => (ushort.MinValue, ushort.MaxValue),
+            SpecialType.System_Int32 => (int.MinValue, int.MaxValue),
+            SpecialType.System_UInt32 => (uint.MinValue, uint.MaxValue),
+            SpecialType.System_Int64 => (long.MinValue, long.MaxValue),
+            SpecialType.System_UInt64 => (ulong.MinValue, ulong.MaxValue),
+            _ => null,
+        };
+
+        var underlying = source is INamedTypeSymbol { TypeKind: TypeKind.Enum, EnumUnderlyingType: { } e } ? e : source;
+        if (RangeOf(underlying) is not { } s || RangeOf(target) is not { } t) return false;
+        return s.Min >= t.Min && s.Max <= t.Max;
     }
 
     private void EmitAwait(AwaitExpressionSyntax await)
@@ -1682,14 +2379,17 @@ public sealed partial class JsEmitter
     // -------------------------------------------------------------------------------------------
 
     private void EmitElementAccess(ElementAccessExpressionSyntax access)
+        => EmitElementAccessOn(access.Expression, access.ArgumentList.Arguments, access);
+
+    /// <summary>Element access on any receiver — a real expression, or a conditional-access stand-in.</summary>
+    private void EmitElementAccessOn(ExpressionSyntax receiver, SeparatedSyntaxList<ArgumentSyntax> arguments, ExpressionSyntax access)
     {
-        var receiverType = _ctx.TypeFor(access.Expression);
-        var arguments = access.ArgumentList.Arguments;
+        var receiverType = _ctx.TypeFor(receiver);
 
         // Dictionary read: Map.get, not property access.
         if (TypeMap.ShapeOf(receiverType) == JsShape.Map)
         {
-            EmitExpression(access.Expression);
+            EmitExpression(receiver);
             Write(".get(");
             WriteJoined(arguments, a => EmitExpression(a.Expression));
             Write(")");
@@ -1699,7 +2399,7 @@ public sealed partial class JsEmitter
         // A user-declared indexer became $get during declaration emission.
         if (_ctx.SymbolFor(access) is IPropertySymbol { IsIndexer: true } indexer && !IsMappedIndexer(indexer))
         {
-            EmitExpression(access.Expression);
+            EmitExpression(receiver);
             Write(".$get(");
             WriteJoined(arguments, a => EmitExpression(a.Expression));
             Write(")");
@@ -1712,14 +2412,14 @@ public sealed partial class JsEmitter
             switch (arguments[0].Expression)
             {
                 case PrefixUnaryExpressionSyntax { RawKind: (int)SyntaxKind.IndexExpression } fromEnd:
-                    EmitExpression(access.Expression);
+                    EmitExpression(receiver);
                     Write(".at(-");
                     EmitExpression(fromEnd.Operand);
                     Write(")");
                     return;
 
                 case RangeExpressionSyntax range:
-                    EmitExpression(access.Expression);
+                    EmitExpression(receiver);
                     Write(".slice(");
                     if (range.LeftOperand is not null) EmitExpression(range.LeftOperand);
                     else Write("0");
@@ -1733,7 +2433,7 @@ public sealed partial class JsEmitter
             }
         }
 
-        EmitExpression(access.Expression);
+        EmitExpression(receiver);
         Write("[");
         WriteJoined(arguments, a => EmitExpression(a.Expression));
         Write("]");
@@ -1742,6 +2442,11 @@ public sealed partial class JsEmitter
     private static bool IsMappedIndexer(IPropertySymbol indexer)
     {
         if (indexer.ContainingType is not { } owner) return false;
+
+        // A binding's indexer describes JavaScript's own bracket access — there is no $get on
+        // a library object, so it emits as plain `obj[key]`.
+        if (NameResolver.IsBindingMember(indexer)) return true;
+
         var name = TypeMap.Unbound(owner);
         return name.StartsWith("System.", StringComparison.Ordinal);
     }
@@ -1766,6 +2471,15 @@ public sealed partial class JsEmitter
         });
         Write(") => ");
 
+        // The lambda is a function of its own: an enclosing method's ref/out rewrite stops here.
+        var previousByRef = _byRefReturn;
+        _byRefReturn = null;
+        EmitLambdaBody(body);
+        _byRefReturn = previousByRef;
+    }
+
+    private void EmitLambdaBody(SyntaxNode? body)
+    {
         switch (body)
         {
             case BlockSyntax block:
@@ -2093,13 +2807,123 @@ public sealed partial class JsEmitter
 
         if (type is INamedTypeSymbol { TypeKind: TypeKind.Enum } enumType)
         {
-            Write($"{ReferenceToType(enumType)}[");
+            EmitEnumName(enumType, () => EmitExpression(expression));
+            return;
+        }
+
+        if (type is INamedTypeSymbol nullable && TypeMap.IsNullableValueType(nullable, out var underlying)
+            && underlying is INamedTypeSymbol { TypeKind: TypeKind.Enum } nullableEnum)
+        {
+            // A null enum prints as nothing; a value prints its name.
+            _ctx.UseHelper("csjsToString");
+            Write("csjsToString(");
+            EmitEnumName(nullableEnum, () => EmitExpression(expression));
+            Write(")");
+            return;
+        }
+
+        switch (type)
+        {
+            // `True`, not `true`: C# capitalises booleans when it turns them into text.
+            case { SpecialType: SpecialType.System_Boolean }:
+                if (expression is LiteralExpressionSyntax)
+                {
+                    Write(expression.IsKind(SyntaxKind.TrueLiteralExpression) ? "'True'" : "'False'");
+                    return;
+                }
+                Write("(");
+                EmitExpression(expression);
+                Write(" ? 'True' : 'False')");
+                return;
+
+            case INamedTypeSymbol named when TypeMap.Unbound(named) == "System.TimeSpan":
+                _ctx.UseHelper("csjsTimeSpanToString");
+                Write("csjsTimeSpanToString(");
+                EmitExpression(expression);
+                Write(")");
+                return;
+
+            case INamedTypeSymbol named when TypeMap.Unbound(named) == "System.DateTime":
+                _ctx.UseHelper("csjsFormatValue");
+                Write("csjsFormatValue(");
+                EmitExpression(expression);
+                Write(", 'G')");
+                return;
+        }
+
+        // C# turns null into "" when it builds a string; JavaScript writes "null". Only values
+        // that can actually be null pay for the guard. An object always goes through it too:
+        // console.log would print its inspected fields, where C# calls ToString().
+        if (CanBeNull(expression, type)
+            || TypeMap.ShapeOf(type) is JsShape.Object or JsShape.Any or JsShape.Array or JsShape.Map or JsShape.Set)
+        {
+            _ctx.UseHelper("csjsToString");
+            Write("csjsToString(");
             EmitExpression(expression);
-            Write("]");
+            Write(")");
             return;
         }
 
         EmitExpression(expression);
+    }
+
+    private bool CanBeNull(ExpressionSyntax expression, ITypeSymbol? type)
+    {
+        if (type is null) return false;
+        if (expression is LiteralExpressionSyntax or InterpolatedStringExpressionSyntax) return expression.IsKind(SyntaxKind.NullLiteralExpression);
+        if (type is INamedTypeSymbol named && TypeMap.IsNullableValueType(named, out _)) return true;
+        if (type.IsValueType) return false;
+        if (type.SpecialType == SpecialType.System_Object || type.TypeKind == TypeKind.TypeParameter) return true;
+
+        var flow = _ctx.Model.GetTypeInfo(expression).Nullability.FlowState;
+        return flow == NullableFlowState.MaybeNull;
+    }
+
+    /// <summary>
+    /// Emits the member name of an enum value. A declared enum carries a reverse map on its
+    /// frozen object; a framework enum has no object at all, so the names are inlined.
+    /// </summary>
+    private void EmitEnumName(INamedTypeSymbol enumType, Action emitValue)
+    {
+        // A value with no member of its own still has text in C#: the number, or for a [Flags]
+        // enum the set flags joined by ", ". Indexing the reverse map alone would give undefined.
+        _ctx.UseHelper("csjsEnumName");
+        Write("csjsEnumName(");
+
+        if (enumType.DeclaringSyntaxReferences.Length > 0 && !IsInlinedEnum(enumType))
+        {
+            Write(ReferenceToType(enumType));
+        }
+        else
+        {
+            var entries = enumType.GetMembers()
+                .OfType<IFieldSymbol>()
+                .Where(f => f.HasConstantValue)
+                .DistinctBy(f => Convert.ToInt64(f.ConstantValue))
+                .Select(f => $"{Convert.ToInt64(f.ConstantValue)}: '{f.Name}'");
+            Write($"{{ {string.Join(", ", entries)} }}");
+        }
+
+        Write(", ");
+        emitValue();
+        if (enumType.GetAttributes().Any(a => a.AttributeClass?.Name == "FlagsAttribute")) Write(", true");
+        Write(")");
+    }
+
+    /// <summary>
+    /// Emits an enum member. A declared enum's member is a property on its frozen object; a
+    /// framework enum (<c>StringSplitOptions</c>, <c>RegexOptions</c>) does not exist in
+    /// JavaScript, so its value is written as the number it is, with the name alongside.
+    /// </summary>
+    private void EmitEnumMember(IFieldSymbol member)
+    {
+        if (member.DeclaringSyntaxReferences.Length == 0 || IsInlinedEnum(member.ContainingType))
+        {
+            Write($"{Convert.ToInt64(member.ConstantValue)} /* {member.ContainingType.Name}.{member.Name} */");
+            return;
+        }
+
+        Write($"{ReferenceToType(member.ContainingType)}.{member.Name}");
     }
 
     private static string EscapeTemplateText(string text)
@@ -2157,110 +2981,6 @@ public sealed partial class JsEmitter
             default:
                 Write("_");
                 break;
-        }
-    }
-
-    // -------------------------------------------------------------------------------------------
-    // LINQ query syntax
-    // -------------------------------------------------------------------------------------------
-
-    /// <summary>
-    /// Lowers LINQ query syntax onto the same array operations method syntax uses.
-    /// <para>
-    /// Ordering has to wrap the chain built so far rather than append to it, because
-    /// <c>csjsOrderBy</c> takes the sequence as its first argument. Emission therefore runs
-    /// innermost-outward: each clause is a function that emits its source before wrapping it.
-    /// </para>
-    /// </summary>
-    private void EmitQuery(QueryExpressionSyntax query)
-    {
-        var range = NameResolver.Escape(query.FromClause.Identifier.Text);
-        Action emitSource = () => EmitExpression(query.FromClause.Expression);
-
-        foreach (var clause in query.Body.Clauses)
-        {
-            var source = emitSource;
-            switch (clause)
-            {
-                case WhereClauseSyntax where:
-                    emitSource = () =>
-                    {
-                        source();
-                        Write($".filter(({range}) => ");
-                        EmitExpression(where.Condition);
-                        Write(")");
-                    };
-                    break;
-
-                case OrderByClauseSyntax orderBy:
-                    foreach (var ordering in orderBy.Orderings)
-                    {
-                        var inner = emitSource;
-                        var descending = ordering.AscendingOrDescendingKeyword.IsKind(SyntaxKind.DescendingKeyword);
-                        emitSource = () =>
-                        {
-                            _ctx.UseHelper("csjsOrderBy");
-                            Write("csjsOrderBy(");
-                            inner();
-                            Write($", ({range}) => ");
-                            EmitExpression(ordering.Expression);
-                            Write($", {(descending ? "true" : "false")})");
-                        };
-                    }
-                    break;
-
-                case LetClauseSyntax let:
-                    // `let` introduces a new binding, which becomes a map producing an object
-                    // carrying both the original element and the new value.
-                    _ctx.Warn(DiagnosticIds.UnsupportedSyntax,
-                        "`let` in query syntax is not supported. Rewrite the query using method syntax.", let);
-                    break;
-
-                case FromClauseSyntax from:
-                    emitSource = () =>
-                    {
-                        source();
-                        Write($".flatMap(({range}) => ");
-                        EmitExpression(from.Expression);
-                        Write(")");
-                    };
-                    break;
-
-                default:
-                    _ctx.Warn(DiagnosticIds.UnsupportedSyntax,
-                        $"Query clause `{clause.Kind()}` is not supported. Rewrite the query using method syntax.",
-                        clause);
-                    break;
-            }
-        }
-
-        switch (query.Body.SelectOrGroup)
-        {
-            case SelectClauseSyntax select:
-                // `select x` where x is the range variable is an identity projection worth dropping.
-                if (select.Expression is IdentifierNameSyntax id && NameResolver.Escape(id.Identifier.Text) == range)
-                {
-                    emitSource();
-                    return;
-                }
-                emitSource();
-                Write($".map(({range}) => ");
-                EmitExpression(select.Expression);
-                Write(")");
-                return;
-
-            case GroupClauseSyntax group:
-                _ctx.UseHelper("csjsGroupBy");
-                Write("csjsGroupBy(");
-                emitSource();
-                Write($", ({range}) => ");
-                EmitExpression(group.ByExpression);
-                Write(")");
-                return;
-
-            default:
-                emitSource();
-                return;
         }
     }
 }

@@ -35,12 +35,62 @@ public sealed record Attachment(string FileName, string Url, string ContentType,
     };
 }
 
-/// <summary>A record of one kernel function the assistant invoked.</summary>
-/// <param name="Name">Function name, e.g. <c>Csjs_Compile</c>.</param>
-/// <param name="Arguments">Arguments as rendered for display.</param>
-/// <param name="Result">What the function returned, truncated for display.</param>
-/// <param name="Succeeded">False when the call threw.</param>
-public sealed record ToolCall(string Name, string Arguments, string Result, bool Succeeded);
+/// <summary>How a kernel function call ended.</summary>
+public enum ToolCallOutcome
+{
+    /// <summary>Still executing.</summary>
+    Running,
+
+    /// <summary>Returned, and what it returned reads as success.</summary>
+    Ok,
+
+    /// <summary>
+    /// Returned normally but reported a failure — a compile error, a non-zero exit. The function
+    /// did its job; the code it checked did not pass.
+    /// </summary>
+    Reported,
+
+    /// <summary>Threw.</summary>
+    Error,
+}
+
+/// <summary>
+/// A record of one kernel function the assistant invoked, kept with the reply it belongs to so
+/// the transcript shows what Jack did rather than only what he said.
+/// <para>
+/// Settable properties rather than a positional record: sessions are persisted as JSON, and a
+/// field added later must deserialize to its default from a file written before it existed.
+/// </para>
+/// </summary>
+public sealed class ToolCall
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("n")[..10];
+
+    /// <summary>Plugin name as registered, e.g. <c>Csjs</c>.</summary>
+    public string Plugin { get; set; } = "";
+
+    /// <summary>Function name, e.g. <c>compile</c>.</summary>
+    public string Function { get; set; } = "";
+
+    /// <summary>Arguments as rendered for display, each value truncated.</summary>
+    public Dictionary<string, string> Arguments { get; set; } = new();
+
+    /// <summary>What the function returned (or the exception message), truncated for display.</summary>
+    public string Result { get; set; } = "";
+
+    public ToolCallOutcome Outcome { get; set; } = ToolCallOutcome.Running;
+
+    public double DurationMs { get; set; }
+
+    /// <summary>
+    /// Length of the reply text when the call began. The transcript places the call at this
+    /// point, so text before and after a tool step reads in the order it happened.
+    /// </summary>
+    public int Offset { get; set; }
+
+    [JsonIgnore]
+    public string QualifiedName => Plugin.Length > 0 ? $"{Plugin}.{Function}" : Function;
+}
 
 /// <summary>One message in a conversation.</summary>
 public sealed class ChatMessage
@@ -51,6 +101,16 @@ public sealed class ChatMessage
     public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.Now;
     public List<Attachment> Attachments { get; set; } = new();
     public List<ToolCall> ToolCalls { get; set; } = new();
+
+    /// <summary>
+    /// A stable copy of <see cref="ToolCalls"/>. Calls are recorded from whatever thread the
+    /// kernel invokes functions on while the UI renders, so readers take a snapshot under the
+    /// same lock the writers use.
+    /// </summary>
+    public ToolCall[] SnapshotToolCalls()
+    {
+        lock (ToolCalls) return ToolCalls.ToArray();
+    }
 
     /// <summary>Set while a response is still arriving, so the UI can show a cursor.</summary>
     [JsonIgnore]

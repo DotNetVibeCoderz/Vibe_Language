@@ -4,6 +4,7 @@
 @inject AppState State
 @inject AttachmentService Attachments
 @inject ProjectService Projects
+@inject NativeDialogs Dialogs
 @inject IJSRuntime Js
 
 <section class="chat">
@@ -106,21 +107,10 @@
     <SettingsDialog OnClose="() => _showSettings = false" />
 }
 
-@if (_attachRequest is not null)
-{
-    <TextPromptDialog Title="@(_attachRequest.Value ? "Lampirkan gambar" : "Lampirkan dokumen")"
-                      Label="Lokasi berkas"
-                      Value=""
-                      Placeholder="@PlaceholderFor(_attachRequest.Value)"
-                      OnConfirm="ConfirmAttach"
-                      OnCancel="() => _attachRequest = null" />
-}
-
 @code {
     private string _draft = "";
     private readonly List<Attachment> _pending = new();
     private bool _showSettings;
-    private bool? _attachRequest;
     private CancellationTokenSource? _cancellation;
 
     protected override void OnInitialized() => Chat.Changed += OnChanged;
@@ -214,29 +204,45 @@
 
     // ---- Attachments ---------------------------------------------------------------------
 
-    private void AttachAsync(bool isImage) => _attachRequest = isImage;
-
-    private static string PlaceholderFor(bool isImage) => isImage
-        ? @"C:\path\ke\gambar.png"
-        : @"C:\path\ke\dokumen.pdf";
-
-    private async Task ConfirmAttach(string path)
+    /// <summary>
+    /// Picks files with the system dialog. Images and documents get separate filters because the
+    /// model treats them differently: an image is looked at, a document is linked.
+    /// </summary>
+    private async Task AttachAsync(bool isImage)
     {
-        _attachRequest = null;
-        if (string.IsNullOrWhiteSpace(path)) return;
+        var paths = await Dialogs.OpenFilesAsync(
+            isImage ? "Lampirkan gambar" : "Lampirkan dokumen",
+            FilterFor(isImage));
 
-        try
+        var failures = new List<string>();
+
+        foreach (var path in paths)
         {
-            var attachment = await Attachments.AddAsync(path.Trim());
-            _pending.Add(attachment);
+            try
+            {
+                _pending.Add(await Attachments.AddAsync(path));
+            }
+            catch (Exception ex)
+            {
+                failures.Add($"{System.IO.Path.GetFileName(path)}: {ex.Message}");
+            }
         }
-        catch (Exception ex)
+
+        if (failures.Count > 0)
         {
-            State.OutputText = $"Gagal melampirkan: {ex.Message}";
+            State.OutputText = "Gagal melampirkan:\n" + string.Join("\n", failures);
             State.Notify();
         }
 
         StateHasChanged();
+    }
+
+    private static string FilterFor(bool isImage)
+    {
+        var extensions = isImage ? AttachmentService.ImageExtensions : AttachmentService.DocumentExtensions;
+        var patterns = string.Join(";", extensions.Select(e => "*" + e));
+        var label = isImage ? "Gambar" : "Dokumen";
+        return $"{label} ({patterns})|{patterns}|Semua berkas (*.*)|*.*";
     }
 
     private void RemoveAttachment(Attachment attachment)

@@ -23,11 +23,17 @@ public sealed class ChatService
     private Microsoft.SemanticKernel.Kernel? _kernel;
     private AppSettings _settings;
 
+    // The reply currently being written. Tool calls the kernel makes while it streams are
+    // recorded into it; null between sends, so a stray invocation records nothing.
+    private ChatMessage? _activeReply;
+    private readonly ToolCallRecorder _recorder;
+
     public ChatService(KernelFactory kernelFactory, EditorBridge editor, AppSettings settings)
     {
         _kernelFactory = kernelFactory;
         _editor = editor;
         _settings = settings;
+        _recorder = new ToolCallRecorder(() => _activeReply, () => Changed?.Invoke());
 
         _storePath = settings.SessionStore.Length > 0
             ? settings.SessionStore
@@ -140,6 +146,7 @@ public sealed class ChatService
         ActiveSession.Messages.Add(reply);
 
         IsBusy = true;
+        _activeReply = reply;
         Changed?.Invoke();
 
         try
@@ -151,18 +158,33 @@ public sealed class ChatService
                     "or switch to Ollama to run a local model.");
             }
 
-            _kernel ??= _kernelFactory.Build(_settings, _editor);
+            if (_kernel is null)
+            {
+                _kernel = _kernelFactory.Build(_settings, _editor);
+                _kernel.FunctionInvocationFilters.Add(_recorder);
+            }
 
             var chat = _kernel.GetRequiredService<IChatCompletionService>();
             var history = BuildHistory();
             var executionSettings = KernelFactory.BuildExecutionSettings(_settings);
 
             var buffer = new StringBuilder();
+            var callsSeen = 0;
 
             await foreach (var chunk in chat.GetStreamingChatMessageContentsAsync(
                                history, executionSettings, _kernel, cancellationToken))
             {
                 if (chunk.Content is not { Length: > 0 } content) continue;
+
+                // Text after a tool step belongs to a new model turn. Without a break it would
+                // run straight on from the sentence before the call.
+                var calls = reply.SnapshotToolCalls().Length;
+                if (calls > callsSeen)
+                {
+                    callsSeen = calls;
+                    if (buffer.Length > 0 && !buffer.ToString().EndsWith("\n\n", StringComparison.Ordinal))
+                        buffer.Append("\n\n");
+                }
 
                 buffer.Append(content);
                 reply.Content = buffer.ToString();
@@ -171,7 +193,7 @@ public sealed class ChatService
 
             reply.Content = buffer.ToString();
 
-            if (reply.Content.Length == 0)
+            if (reply.Content.Length == 0 && reply.ToolCalls.Count == 0)
                 reply.Content = "(The model returned an empty response.)";
         }
         catch (OperationCanceledException)
@@ -187,6 +209,7 @@ public sealed class ChatService
         }
         finally
         {
+            _activeReply = null;
             reply.IsStreaming = false;
             IsBusy = false;
             ActiveSession.UpdatedAt = DateTimeOffset.Now;

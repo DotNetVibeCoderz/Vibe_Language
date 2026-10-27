@@ -16,6 +16,9 @@
     <ProjectReference Include="..\..\src\CSJS.Core\CSJS.Core.csproj" />
     <ProjectReference Include="..\..\src\CSJS.Interop\CSJS.Interop.csproj" />
     <ProjectReference Include="..\..\src\CSJS.Testing\CSJS.Testing.csproj" />
+    <ProjectReference Include="..\..\src\CSJS.LanguageService\CSJS.LanguageService.csproj" />
+    <!-- The real `cs2js` is launched by LspServerTests and driven over stdio. -->
+    <ProjectReference Include="..\..\src\CSJS.Cli\CSJS.Cli.csproj" />
   </ItemGroup>
 
 </Project>

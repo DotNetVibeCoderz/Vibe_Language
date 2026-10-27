@@ -88,8 +88,11 @@ public sealed class NameResolver
                 }
                 else
                 {
+                    // A binding's overloads all describe one JavaScript function, which
+                    // dispatches on its arguments at runtime — suffixing them would call
+                    // methods the library does not have.
                     var baseName = DefaultName(method);
-                    _memberNames[method] = i == 0 ? baseName : $"{baseName}${i}";
+                    _memberNames[method] = i == 0 || IsBindingMember(method) ? baseName : $"{baseName}${i}";
                 }
             }
         }
@@ -114,8 +117,8 @@ public sealed class NameResolver
     /// </summary>
     private static string DefaultName(ISymbol member)
     {
-        if (ExplicitName(member) is { } explicitName) return Escape(explicitName);
-        return IsBindingMember(member) ? CamelCase(member.Name) : Escape(member.Name);
+        if (ExplicitName(member) is { } explicitName) return EscapeMember(explicitName);
+        return IsBindingMember(member) ? BindingName(member.Name) : Escape(member.Name);
     }
 
     private static int DeclarationOrder(IMethodSymbol method)
@@ -143,18 +146,42 @@ public sealed class NameResolver
         target = target.OriginalDefinition;
 
         if (_memberNames.TryGetValue(target, out var name)) return name;
-        if (ExplicitName(target) is { } explicitName) return Escape(explicitName);
+        if (ExplicitName(target) is { } explicitName) return EscapeMember(explicitName);
 
         // Members of a binding type name real JavaScript APIs, which are camelCase by
         // convention. Defaulting to that spelling means a binding only needs [JsName] where
         // the JS name genuinely differs, rather than on every single member.
-        if (IsBindingMember(target)) return CamelCase(target.Name);
+        if (IsBindingMember(target)) return BindingName(target.Name);
 
         return Escape(target.Name);
     }
 
+    /// <summary>
+    /// The JavaScript name a binding member gets from its C# name: the camelCase form, with no
+    /// keyword escaping.
+    /// <para>
+    /// A member name only ever appears after a dot or as an object key, where JavaScript accepts
+    /// reserved words — <c>map.delete(k)</c>, <c>{ default: 1 }</c>. Escaping them to
+    /// <c>delete_</c> would name a member the library does not have. The binding generator uses
+    /// this to decide when a member needs <c>[JsName]</c> at all.
+    /// </para>
+    /// </summary>
+    public static string BindingName(string csharpName) => EscapeMember(CamelCaseRaw(csharpName));
+
+    /// <summary>
+    /// Makes a member name a valid JavaScript identifier without touching reserved words, which
+    /// are legal in member position. An explicit <c>[JsName]</c> is taken at its word.
+    /// </summary>
+    private static string EscapeMember(string identifier)
+    {
+        if (identifier.Length == 0) return "_";
+        var first = identifier[0];
+        if (!char.IsLetter(first) && first != '_' && first != '$') return "_" + identifier;
+        return identifier;
+    }
+
     /// <summary>True when a member belongs to a type declared as a JavaScript binding.</summary>
-    private static bool IsBindingMember(ISymbol member)
+    internal static bool IsBindingMember(ISymbol member)
     {
         if (member.ContainingType is not { } owner) return false;
 
@@ -171,23 +198,21 @@ public sealed class NameResolver
         => symbol.GetAttributes().Any(a => a.AttributeClass?.Name is "JsGlobalAttribute" or "JsImportAttribute");
 
     /// <summary>Lowercases a leading run of capitals: <c>InnerHTML</c> to <c>innerHTML</c>.</summary>
-    internal static string CamelCase(string name)
+    private static string CamelCaseRaw(string name)
     {
         if (name.Length == 0) return name;
-        if (!char.IsUpper(name[0])) return Escape(name);
+        if (!char.IsUpper(name[0])) return name;
 
         // A run of capitals is an acronym; only the run's leading portion lowercases, so
         // `URL` becomes `url` but `URLPath` becomes `urlPath`.
         var upperRun = 0;
         while (upperRun < name.Length && char.IsUpper(name[upperRun])) upperRun++;
 
-        var result = upperRun == name.Length
+        return upperRun == name.Length
             ? name.ToLowerInvariant()
             : upperRun == 1
                 ? char.ToLowerInvariant(name[0]) + name[1..]
                 : name[..(upperRun - 1)].ToLowerInvariant() + name[(upperRun - 1)..];
-
-        return Escape(result);
     }
 
     /// <summary>A local, parameter, or label name, escaped against JavaScript keywords.</summary>

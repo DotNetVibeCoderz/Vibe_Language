@@ -9,16 +9,20 @@ Language support for `.csjs` files — C# that transpiles to modern JavaScript.
 `[JsObjectLiteral]`) get their own scope, because whether a declaration is a *binding* or a
 *real type* is the thing you most need to see at a glance in this language.
 
-**IntelliSense** for the CSJS layer: the interop attributes and the `CSJS.Browser` bindings,
-with each completion showing what the member emits. Ordinary C# completion is left to the C#
-extension, which does it better.
+**Real C# IntelliSense** from the CSJS language server (`cs2js lsp`): completion, hover,
+signature help, and go-to-definition, resolved by Roslyn against the same references the
+transpiler uses — so `Document.` completes the browser bindings and `string.` the BCL.
 
-**Hover** over `List`, `Dictionary`, `Task`, or an interop attribute to see what it becomes in
-JavaScript.
+**Hover shows what a member emits**: `{this}.toUpperCase()` for `ToUpper`, or a warning when a
+framework member has no JavaScript mapping.
 
-**Diagnostics** come from the transpiler itself via `cs2js`, so what you see in the Problems
-panel is exactly what the build reports. There is deliberately no second analyser here — a
-separate one would drift from the compiler and start flagging things the build does not.
+**Diagnostics** are the compiler's plus the transpiler's own (`CSJS0002` and friends), pushed as
+you type. They come from the transpiler itself, so the Problems panel shows exactly what the
+build reports — there is deliberately no second analyser to drift from it.
+
+`.csjs` files are served everywhere; `.cs` files only inside folders that contain a `csjs.json`
+(a `.csproj` built with `CSJS.Build` is better served by the C# extension, which already sees it
+as real C#). See [docs/language-server.md](../docs/language-server.md).
 
 **Build tasks** (`csjs: build`, `run`, `watch`, `serve`) with a problem matcher.
 

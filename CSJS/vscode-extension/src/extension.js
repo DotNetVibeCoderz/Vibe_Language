@@ -4,6 +4,11 @@
 // through the cs2js CLI. There is deliberately no second type engine here: a separate analyser
 // would drift from the compiler and start reporting things the build does not.
 //
+// IntelliSense — completion, hover, signature help, go to definition, live diagnostics — comes
+// from `cs2js lsp`, the same language service CSJSGen runs in-process. It binds the project
+// exactly as `cs2js build` does and runs the transpiler for diagnostics, so CSJS0002 and friends
+// appear as you type rather than only after a build.
+//
 // Gravicode Studios — led by Kang Fadhil.
 
 const vscode = require('vscode');
@@ -17,6 +22,8 @@ let output;
 let diagnostics;
 /** @type {vscode.StatusBarItem} */
 let status;
+/** The running language client, or undefined when the server is off or failed to start. */
+let client;
 
 function activate(context) {
   output = vscode.window.createOutputChannel('CSJS');
@@ -39,14 +46,18 @@ function activate(context) {
     vscode.commands.registerCommand('csjs.watch', () => runInTerminal('watch')),
     vscode.commands.registerCommand('csjs.showOutput', () => showGeneratedJavaScript()),
     vscode.commands.registerCommand('csjs.newProject', () => newProject()),
+    vscode.commands.registerCommand('csjs.restartLanguageServer', () => restartLanguageServer()),
 
     vscode.tasks.registerTaskProvider('csjs', taskProvider()),
     vscode.workspace.onDidSaveTextDocument(onSave),
-
-    // IntelliSense is driven by the transpiler's own view of the language.
-    vscode.languages.registerCompletionItemProvider('csjs', completionProvider(), '.', '['),
-    vscode.languages.registerHoverProvider('csjs', hoverProvider()),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration('csjs.languageServer')) restartLanguageServer();
+    }),
+    { dispose: () => stopLanguageServer() },
   );
+
+  // IntelliSense is driven by the transpiler's own view of the language, through cs2js lsp.
+  return startLanguageServer();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -88,7 +99,11 @@ async function build() {
   if (result.stderr) output.appendLine(result.stderr);
 
   const problems = parseDiagnostics(result.stdout + '\n' + result.stderr, directory);
-  applyDiagnostics(problems);
+
+  // With the language server running, the same diagnostics are already live in the Problems
+  // panel; adding the build's copy would list every one of them twice.
+  if (client) diagnostics.clear();
+  else applyDiagnostics(problems);
 
   const errors = problems.filter((p) => p.severity === vscode.DiagnosticSeverity.Error).length;
 
@@ -320,114 +335,125 @@ function taskProvider() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// IntelliSense
+// IntelliSense: the cs2js language server
 // ---------------------------------------------------------------------------------------------
 
 /**
- * Completions for the parts of CSJS that are not plain C#: the interop attributes and the
- * browser bindings. Ordinary C# completion is left to the C# extension, which does it better.
+ * Starts `cs2js lsp` as a language client.
+ *
+ * `.csjs` files are served everywhere. Plain `.cs` files are served only inside a folder that
+ * holds a csjs.json, so a repository mixing a .NET backend with a CSJS client keeps its backend
+ * C# with the C# extension rather than binding it against browser references.
  */
-function completionProvider() {
-  return {
-    provideCompletionItems(document, position) {
-      const line = document.lineAt(position).text.slice(0, position.character);
+async function startLanguageServer() {
+  const config = vscode.workspace.getConfiguration('csjs');
+  if (!config.get('languageServer.enabled', true)) return;
 
-      if (/\[\s*\w*$/.test(line)) return interopAttributeCompletions();
-      if (/\bDocument\.$/.test(line)) return memberCompletions(DOCUMENT_MEMBERS);
-      if (/\bWindow\.$/.test(line)) return memberCompletions(WINDOW_MEMBERS);
+  let languageClient;
+  try {
+    languageClient = require('vscode-languageclient/node');
+  } catch {
+    output.appendLine('CSJS: vscode-languageclient is missing — run `npm install` in the extension folder. IntelliSense is unavailable.');
+    return;
+  }
 
-      return undefined;
+  const server = resolveServerCommand();
+  const serverOptions = {
+    command: server.command,
+    args: [...server.args, 'lsp'],
+    transport: languageClient.TransportKind.stdio,
+    options: { cwd: projectDirectory() ?? undefined },
+  };
+
+  const documentSelector = [{ scheme: 'file', language: 'csjs' }];
+  if (config.get('languageServer.csharpFiles', true)) {
+    for (const directory of await csjsProjectDirectories()) {
+      documentSelector.push({
+        scheme: 'file',
+        language: 'csharp',
+        pattern: `${directory.replace(/\\/g, '/')}/**/*.cs`,
+      });
+    }
+  }
+
+  const clientOptions = {
+    documentSelector,
+    outputChannel: output,
+    synchronize: {
+      // Files changed outside the editor — a checkout, a generator — and csjs.json edits, which
+      // change what the project compiles.
+      fileEvents: vscode.workspace.createFileSystemWatcher('**/{*.cs,*.csjs,csjs.json}'),
     },
   };
+
+  client = new languageClient.LanguageClient('csjs', 'CSJS Language Server', serverOptions, clientOptions);
+  output.appendLine(`> ${server.command} ${[...server.args, 'lsp'].join(' ')}`);
+
+  try {
+    await client.start();
+    // Build output would now only duplicate what the server reports live.
+    diagnostics.clear();
+  } catch (error) {
+    output.appendLine(`CSJS: the language server did not start: ${error?.message ?? error}`);
+    vscode.window.showWarningMessage(
+      'CSJS: could not start `cs2js lsp`. Install the CLI or set csjs.languageServer.path.');
+    client = undefined;
+  }
 }
 
-const INTEROP_ATTRIBUTES = [
-  ['JsExport', 'JsExport(Global = true)', 'Export the type so host HTML can reach it.'],
-  ['JsImport', 'JsImport("${1:module}", "${2:Export}")', 'Bind to a JavaScript module export. Emits a real ES import.'],
-  ['JsGlobal', 'JsGlobal("${1:name}")', 'Bind to an existing JavaScript global. No declaration is emitted.'],
-  ['JsName', 'JsName("${1:jsName}")', 'Override the emitted JavaScript name.'],
-  ['JsBody', 'JsBody("${1:return 0;}")', 'Supply a raw JavaScript body for this method.'],
-  ['JsTemplate', 'JsTemplate("${1:{this}[{0}]}")', 'Rewrite every call site into a JavaScript expression.'],
-  ['JsObjectLiteral', 'JsObjectLiteral', 'Emit instances as plain object literals rather than a class.'],
-  ['JsIgnore', 'JsIgnore', 'Exclude this declaration from transpilation entirely.'],
-];
-
-function interopAttributeCompletions() {
-  return INTEROP_ATTRIBUTES.map(([label, snippet, detail]) => {
-    const item = new vscode.CompletionItem(label, vscode.CompletionItemKind.Property);
-    item.insertText = new vscode.SnippetString(snippet);
-    item.detail = 'CSJS interop';
-    item.documentation = new vscode.MarkdownString(detail);
-    return item;
-  });
+async function stopLanguageServer() {
+  const running = client;
+  client = undefined;
+  if (running) {
+    try { await running.stop(); } catch { /* already gone */ }
+  }
 }
 
-const DOCUMENT_MEMBERS = [
-  ['QuerySelector', 'querySelector', 'Element?'],
-  ['QuerySelectorAll', 'querySelectorAll', 'Element[]'],
-  ['GetElementById', 'getElementById', 'Element?'],
-  ['CreateElement', 'createElement', 'Element'],
-  ['AddEventListener', 'addEventListener', 'void'],
-  ['Body', 'body', 'Element'],
-  ['Title', 'title', 'string'],
-];
-
-const WINDOW_MEMBERS = [
-  ['InnerWidth', 'innerWidth', 'double'],
-  ['InnerHeight', 'innerHeight', 'double'],
-  ['LocalStorage', 'localStorage', 'Storage'],
-  ['Location', 'location', 'Location'],
-  ['RequestAnimationFrame', 'requestAnimationFrame', 'int'],
-  ['AddEventListener', 'addEventListener', 'void'],
-  ['Alert', 'alert', 'void'],
-];
-
-function memberCompletions(members) {
-  return members.map(([name, emitted, type]) => {
-    const item = new vscode.CompletionItem(name, vscode.CompletionItemKind.Method);
-    item.detail = type;
-    // Showing the emitted name is the point: this is a transpiler, and knowing what a member
-    // becomes is as useful as knowing its type.
-    item.documentation = new vscode.MarkdownString(`Emits \`${emitted}\``);
-    return item;
-  });
+async function restartLanguageServer() {
+  await stopLanguageServer();
+  await startLanguageServer();
 }
 
-/** Hovering a mapped member shows what it transpiles to. */
-function hoverProvider() {
-  return {
-    provideHover(document, position) {
-      const range = document.getWordRangeAtPosition(position);
-      if (!range) return undefined;
+/**
+ * How to launch the server: the configured path when there is one, `cs2js` when it is on PATH,
+ * and `dotnet cs2js` — the CSJS.Cli tool — otherwise.
+ */
+function resolveServerCommand() {
+  const configured = vscode.workspace.getConfiguration('csjs').get('languageServer.path', '').trim();
+  if (configured) {
+    // A path to an executable, or a command line such as `dotnet cs2js`.
+    if (fs.existsSync(configured)) return { command: configured, args: [] };
+    const [command, ...args] = configured.split(/\s+/);
+    return { command, args };
+  }
 
-      const word = document.getText(range);
-      const mapping = TRANSLATIONS[word];
-      if (!mapping) return undefined;
-
-      const markdown = new vscode.MarkdownString();
-      markdown.appendMarkdown(`**CSJS** — emits:\n\n`);
-      markdown.appendCodeblock(mapping, 'javascript');
-      return new vscode.Hover(markdown, range);
-    },
-  };
+  if (onPath('cs2js')) return { command: 'cs2js', args: [] };
+  return { command: 'dotnet', args: ['cs2js'] };
 }
 
-/** What the most commonly asked-about constructs turn into. */
-const TRANSLATIONS = {
-  List: '[]  // a real Array',
-  Dictionary: 'new Map()',
-  HashSet: 'new Set()',
-  Task: 'Promise',
-  IEnumerable: 'Array, or a generator when produced by an iterator',
-  StringBuilder: 'csjsStringBuilder()  // runtime helper',
-  JsExport: 'export class …  (plus globalThis assignment when Global = true)',
-  JsImport: "import { … } from '…'",
-  JsGlobal: 'the JavaScript global itself; nothing is declared',
-  JsObjectLiteral: '{ … }  // a plain object, no class',
-};
+function onPath(name) {
+  const extensions = process.platform === 'win32'
+    ? (process.env.PATHEXT ?? '.EXE;.CMD;.BAT').split(';').map((e) => e.toLowerCase())
+    : [''];
+
+  for (const directory of (process.env.PATH ?? '').split(path.delimiter)) {
+    if (!directory) continue;
+    for (const extension of extensions) {
+      if (fs.existsSync(path.join(directory, name + extension))) return true;
+    }
+  }
+  return false;
+}
+
+/** Folders holding a csjs.json, which is what makes a folder's .cs files CSJS sources. */
+async function csjsProjectDirectories() {
+  const files = await vscode.workspace.findFiles('**/csjs.json', '**/{node_modules,bin,obj,dist}/**', 50);
+  return files.map((uri) => path.dirname(uri.fsPath));
+}
 
 function deactivate() {
   diagnostics?.clear();
+  return stopLanguageServer();
 }
 
 module.exports = { activate, deactivate };

@@ -29,7 +29,7 @@ public sealed partial class JsEmitter
     /// <summary>Emits every declaration in a parsed file, plus any top-level statements.</summary>
     public void EmitCompilationUnit(CompilationUnitSyntax unit)
     {
-        var types = CollectTypeDeclarations(unit).ToList();
+        var types = OrderForEvaluation(CollectTypeDeclarations(unit).ToList());
 
         foreach (var type in types)
         {
@@ -70,6 +70,49 @@ public sealed partial class JsEmitter
             Out.WriteLine(main.IsAsync ? $"await {call};" : $"{call};");
             return;
         }
+    }
+
+    /// <summary>
+    /// Orders a module's declarations so each is defined before anything that needs it while
+    /// the module evaluates.
+    /// <para>
+    /// C# does not care about declaration order; JavaScript does. A class binding is in its
+    /// temporal dead zone until its declaration runs, so <c>class B extends A</c> fails when A comes
+    /// later, and so does a static field initialised with <c>P.$default()</c>. Enums and structs
+    /// depend on nothing at evaluation time, so they go first; classes follow with every base
+    /// class ahead of the classes that extend it. Source order is kept wherever it is already safe.
+    /// </para>
+    /// </summary>
+    private List<MemberDeclarationSyntax> OrderForEvaluation(List<MemberDeclarationSyntax> declarations)
+    {
+        var symbols = declarations.ToDictionary(d => d, d => _ctx.Model.GetDeclaredSymbol(d) as INamedTypeSymbol);
+        var ordered = new List<MemberDeclarationSyntax>();
+        var placed = new HashSet<MemberDeclarationSyntax>();
+
+        foreach (var declaration in declarations.Where(d => d is EnumDeclarationSyntax or StructDeclarationSyntax
+                     or RecordDeclarationSyntax { ClassOrStructKeyword.RawKind: (int)SyntaxKind.StructKeyword }))
+        {
+            ordered.Add(declaration);
+            placed.Add(declaration);
+        }
+
+        void Place(MemberDeclarationSyntax declaration, int depth)
+        {
+            if (placed.Contains(declaration) || depth > declarations.Count) return;
+
+            // Base class first, when it is declared in this same module.
+            if (symbols[declaration]?.BaseType is { } baseType)
+            {
+                var baseDeclaration = declarations.FirstOrDefault(d =>
+                    SymbolEqualityComparer.Default.Equals(symbols[d], baseType.OriginalDefinition));
+                if (baseDeclaration is not null) Place(baseDeclaration, depth + 1);
+            }
+
+            if (placed.Add(declaration)) ordered.Add(declaration);
+        }
+
+        foreach (var declaration in declarations) Place(declaration, 0);
+        return ordered;
     }
 
     private static IEnumerable<MemberDeclarationSyntax> CollectTypeDeclarations(SyntaxNode root)
@@ -114,6 +157,11 @@ public sealed partial class JsEmitter
 
         switch (declaration)
         {
+            // An inlined enum's members are written as numbers wherever they are used, so the
+            // object would never be read.
+            case EnumDeclarationSyntax when IsInlinedEnum(symbol):
+                break;
+
             case EnumDeclarationSyntax enumDecl:
                 EmitEnum(enumDecl, symbol);
                 break;
@@ -197,7 +245,7 @@ public sealed partial class JsEmitter
 
     private void EmitClassBody(TypeDeclarationSyntax declaration, INamedTypeSymbol symbol)
     {
-        var members = declaration.Members.Where(m => !IsIgnored(m)).ToList();
+        var members = declaration.Members.Where(m => !IsIgnored(m) && !IsRemoved(m)).ToList();
 
         // Fields and auto-properties become class fields. Doing them first keeps the shape
         // of the emitted class close to how the C# reads.
@@ -221,6 +269,9 @@ public sealed partial class JsEmitter
         foreach (var method in members.OfType<MethodDeclarationSyntax>())
             EmitMethod(method);
 
+        foreach (var block in members.OfType<ExtensionBlockDeclarationSyntax>())
+            EmitExtensionBlock(block);
+
         foreach (var indexer in members.OfType<IndexerDeclarationSyntax>())
             EmitIndexer(indexer);
 
@@ -233,8 +284,152 @@ public sealed partial class JsEmitter
         if (declaration is RecordDeclarationSyntax record)
             EmitRecordEquality(record, symbol);
 
+        if (symbol.TypeKind == TypeKind.Struct)
+            EmitStructSemantics(declaration, symbol);
+
         EmitToStringBridge(declaration, symbol);
     }
+
+    /// <summary>
+    /// The JavaScript-side state of a struct: every field the emitted class carries, with its type.
+    /// Explicit fields, auto-property storage, <c>field</c>-keyword storage, and the captured
+    /// parameters of a non-record primary constructor all count.
+    /// </summary>
+    private List<(string Name, ITypeSymbol Type)> StructState(TypeDeclarationSyntax declaration, INamedTypeSymbol symbol)
+    {
+        var state = new List<(string, ITypeSymbol)>();
+
+        foreach (var field in symbol.GetMembers().OfType<IFieldSymbol>())
+        {
+            if (field.IsStatic || field.IsConst) continue;
+
+            if (field.AssociatedSymbol is IPropertySymbol property)
+                state.Add((IsAutoProperty(property) ? _ctx.Names.MemberName(property) : FieldKeywordStorage(property), field.Type));
+            else if (!field.IsImplicitlyDeclared)
+                state.Add((_ctx.Names.MemberName(field), field.Type));
+        }
+
+        if (declaration is not RecordDeclarationSyntax && declaration.ParameterList is { } primary)
+        {
+            foreach (var parameter in primary.Parameters)
+            {
+                if (_ctx.Model.GetDeclaredSymbol(parameter) is { } p)
+                    state.Add((NameResolver.Escape(p.Name), p.Type));
+            }
+        }
+
+        return state.DistinctBy(s => s.Item1).ToList();
+    }
+
+    /// <summary>
+    /// Gives a struct value semantics. JavaScript has only reference types, so a struct is a class
+    /// whose copies have to be made explicitly: <c>$clone</c> is what assignment, argument passing,
+    /// and <c>return</c> call, and <c>$default</c> is <c>default(T)</c> — every field zeroed, no
+    /// constructor run. Without these, <c>var b = a; b.X = 9;</c> changes <c>a</c> too.
+    /// </summary>
+    private void EmitStructSemantics(TypeDeclarationSyntax declaration, INamedTypeSymbol symbol)
+    {
+        var name = _ctx.Names.TypeName(symbol);
+        var state = StructState(declaration, symbol);
+
+        Out.WriteLine();
+        Out.WriteLine("/** A copy, as assigning a struct produces in C#. */");
+        Out.WriteLine("$clone() {");
+        Out.InBlock(() =>
+        {
+            Out.WriteLine($"const copy = Object.create({name}.prototype);");
+            foreach (var (field, type) in state)
+            {
+                var copied = IsMutableStruct(type)
+                    ? (IsNullableValue(type) ? $"this.{field}?.$clone() ?? null" : $"this.{field}.$clone()")
+                    : $"this.{field}";
+                Out.WriteLine($"copy.{field} = {copied};");
+            }
+            Out.WriteLine("return copy;");
+        });
+        Out.WriteLine("}");
+
+        Out.WriteLine();
+        Out.WriteLine($"/** The zero value, as default({symbol.Name}) produces in C#. */");
+        Out.WriteLine("static $default() {");
+        Out.InBlock(() =>
+        {
+            Out.WriteLine($"const value = Object.create({name}.prototype);");
+            foreach (var (field, type) in state)
+                Out.WriteLine($"value.{field} = {DefaultValueFor(type)};");
+            Out.WriteLine("return value;");
+        });
+        Out.WriteLine("}");
+
+        // ValueType.Equals compares field by field. A record struct already has its own Equals,
+        // and a struct that writes Equals(object) has decided for itself.
+        var declaresEquals = declaration.Members.OfType<MethodDeclarationSyntax>()
+            .Any(m => m.Identifier.Text == "Equals" && m.ParameterList.Parameters.Count == 1);
+        if (declaration is RecordDeclarationSyntax || declaresEquals) return;
+
+        Out.WriteLine();
+        Out.WriteLine("/** Field-by-field equality, matching ValueType.Equals. */");
+        Out.WriteLine("Equals(other) {");
+        Out.InBlock(() =>
+        {
+            Out.WriteLine($"if (!(other instanceof {name})) return false;");
+            if (state.Count == 0)
+            {
+                Out.WriteLine("return true;");
+                return;
+            }
+
+            var comparisons = state.Select(s =>
+            {
+                if (TypeMap.ShapeOf(s.Type) is JsShape.Number or JsShape.String or JsShape.Boolean or JsShape.BigInt
+                    && !IsNullableValue(s.Type))
+                {
+                    return $"this.{s.Name} === other.{s.Name}";
+                }
+                _ctx.UseHelper("csjsEquals");
+                return $"csjsEquals(this.{s.Name}, other.{s.Name})";
+            });
+            Out.WriteLine($"return {string.Join(" && ", comparisons)};");
+        });
+        Out.WriteLine("}");
+        Out.WriteLine();
+        Out.WriteLine("equals(other) { return this.Equals(other); }");
+    }
+
+    /// <summary>
+    /// True for a struct declared in this compilation whose instances can change after
+    /// construction. Copying a <c>readonly struct</c> is unobservable, so it is shared instead.
+    /// </summary>
+    internal static bool IsMutableStruct(ITypeSymbol? type)
+    {
+        if (type is INamedTypeSymbol named && TypeMap.IsNullableValueType(named, out var underlying)) type = underlying;
+        return type is INamedTypeSymbol { TypeKind: TypeKind.Struct, IsReadOnly: false } s
+               && s.DeclaringSyntaxReferences.Length > 0
+               && !s.IsRefLikeType;
+    }
+
+    private static bool IsNullableValue(ITypeSymbol type)
+        => type is INamedTypeSymbol named && TypeMap.IsNullableValueType(named, out _);
+
+    /// <summary>A struct declared in this compilation, mutable or not.</summary>
+    private static bool IsDeclaredStruct(ITypeSymbol? type)
+        => type is INamedTypeSymbol { TypeKind: TypeKind.Struct } s && s.DeclaringSyntaxReferences.Length > 0;
+
+    private static bool IsAutoProperty(IPropertySymbol property)
+        => property.DeclaringSyntaxReferences
+            .Select(r => r.GetSyntax())
+            .OfType<PropertyDeclarationSyntax>()
+            .Any(p => p.ExpressionBody is null
+                      && p.AccessorList is { } list
+                      && list.Accessors.All(a => a.Body is null && a.ExpressionBody is null))
+           // A record's positional parameters are auto-properties without a property declaration.
+           || property.DeclaringSyntaxReferences.Select(r => r.GetSyntax()).Any(n => n is ParameterSyntax);
+
+    /// <summary>
+    /// Storage for a property that uses the C# 14 <c>field</c> keyword. The accessors stay real
+    /// accessors, so the value needs a slot of its own beside them.
+    /// </summary>
+    private string FieldKeywordStorage(IPropertySymbol property) => "$" + _ctx.Names.MemberName(property);
 
     /// <summary>
     /// Adds a lowercase <c>toString</c> delegating to the user's <c>ToString</c>.
@@ -261,7 +456,7 @@ public sealed partial class JsEmitter
         foreach (var variable in field.Declaration.Variables)
         {
             var symbol = _ctx.Model.GetDeclaredSymbol(variable) as IFieldSymbol;
-            if (symbol is null || HasAttribute(symbol, "JsIgnoreAttribute")) continue;
+            if (symbol is null || HasAttribute(symbol, "JsIgnoreAttribute") || IsRemoved(symbol)) continue;
 
             Out.MapTo(variable.GetLocation());
             // `const` fields are still class fields; freezing them individually is not worth
@@ -272,7 +467,7 @@ public sealed partial class JsEmitter
             if (variable.Initializer is not null)
             {
                 Write(" = ");
-                EmitExpression(variable.Initializer.Value);
+                EmitExpressionAs(variable.Initializer.Value, symbol.Type);
             }
             else
             {
@@ -286,7 +481,7 @@ public sealed partial class JsEmitter
     private void EmitProperty(PropertyDeclarationSyntax property)
     {
         var symbol = _ctx.Model.GetDeclaredSymbol(property);
-        if (symbol is null || HasAttribute(symbol, "JsIgnoreAttribute")) return;
+        if (symbol is null || HasAttribute(symbol, "JsIgnoreAttribute") || IsRemoved(symbol)) return;
 
         var name = _ctx.Names.MemberName(symbol);
         var isStatic = property.Modifiers.Any(SyntaxKind.StaticKeyword);
@@ -307,7 +502,15 @@ public sealed partial class JsEmitter
         var setter = accessors.FirstOrDefault(a => a.IsKind(SyntaxKind.SetAccessorDeclaration))
                      ?? accessors.FirstOrDefault(a => a.IsKind(SyntaxKind.InitAccessorDeclaration));
 
-        var isAuto = getter is { Body: null, ExpressionBody: null };
+        static bool Bodiless(AccessorDeclarationSyntax? a) => a is { Body: null, ExpressionBody: null };
+
+        // An abstract property has no implementation to emit, and a field would be an own
+        // property of every instance — shadowing the getter the subclass defines on its prototype.
+        if (symbol.IsAbstract) return;
+
+        // A virtual auto-property must stay an accessor for the same reason: an override's
+        // accessors live on the subclass prototype, which an own field would hide.
+        var isAuto = accessors.Count > 0 && accessors.All(Bodiless) && !symbol.IsVirtual && !symbol.IsOverride;
 
         if (isAuto)
         {
@@ -315,28 +518,63 @@ public sealed partial class JsEmitter
             // getter/setter pair keeps the output readable and avoids a pointless indirection.
             Out.MapTo(property.Identifier.GetLocation());
             Write($"{prefix}{name} = ");
-            if (property.Initializer is not null) EmitExpression(property.Initializer.Value);
+            if (property.Initializer is not null) EmitExpressionAs(property.Initializer.Value, symbol.Type);
             else Write(DefaultValueFor(symbol.Type));
             Out.WriteLine(";");
             return;
         }
 
+        // C# 14's `field` keyword, or a bodiless accessor beside a bodied one, means the
+        // compiler synthesised storage. The accessors stay accessors and the storage gets a slot.
+        var usesStorage = accessors.Any(Bodiless)
+                          || property.DescendantNodes().Any(n => n.IsKind(SyntaxKind.FieldExpression));
+        var storage = FieldKeywordStorage(symbol);
+        if (usesStorage)
+        {
+            Out.MapTo(property.Identifier.GetLocation());
+            Write($"{prefix}{storage} = ");
+            if (property.Initializer is not null) EmitExpressionAs(property.Initializer.Value, symbol.Type);
+            // Synthesised storage starts at the CLR default — null for a string, whatever its
+            // annotation says — and `field ?? fallback` getters depend on exactly that.
+            else Write(symbol.Type.SpecialType == SpecialType.System_String ? "null" : DefaultValueFor(symbol.Type));
+            Out.WriteLine(";");
+        }
+
+        var target = isStatic ? _ctx.Names.TypeName(symbol.ContainingType) : "this";
+
         if (getter is not null)
         {
             Out.MapTo(getter.GetLocation());
             Write($"{prefix}get {name}() ");
-            EmitAccessorBody(getter, isGetter: true);
+            if (Bodiless(getter)) Out.WriteLine($"{{ return {target}.{storage}; }}");
+            else EmitAccessorBody(getter, isGetter: true);
         }
 
         if (setter is not null)
         {
             Out.MapTo(setter.GetLocation());
             Write($"{prefix}set {name}(value) ");
-            EmitAccessorBody(setter, isGetter: false);
+            if (Bodiless(setter)) Out.WriteLine($"{{ {target}.{storage} = value; }}");
+            else EmitAccessorBody(setter, isGetter: false);
         }
     }
 
     private void EmitAccessorBody(AccessorDeclarationSyntax accessor, bool isGetter)
+    {
+        // A lambda inside an accessor must not inherit the enclosing method's ref/out rewrite.
+        var previousByRef = _byRefReturn;
+        _byRefReturn = null;
+        try
+        {
+            EmitAccessorBodyCore(accessor, isGetter);
+        }
+        finally
+        {
+            _byRefReturn = previousByRef;
+        }
+    }
+
+    private void EmitAccessorBodyCore(AccessorDeclarationSyntax accessor, bool isGetter)
     {
         if (accessor.Body is not null)
         {
@@ -538,7 +776,7 @@ public sealed partial class JsEmitter
     private void EmitMethod(MethodDeclarationSyntax method)
     {
         var symbol = _ctx.Model.GetDeclaredSymbol(method);
-        if (symbol is null || HasAttribute(symbol, "JsIgnoreAttribute")) return;
+        if (symbol is null || HasAttribute(symbol, "JsIgnoreAttribute") || IsRemoved(symbol)) return;
 
         // An abstract or extern declaration has no body to emit.
         if (method.Body is null && method.ExpressionBody is null && GetJsBody(symbol) is null)
@@ -568,11 +806,75 @@ public sealed partial class JsEmitter
         Out.InBlock(() =>
         {
             if (GetJsBody(symbol) is { } raw) WriteRawJs(raw);
-            else EmitStatementsOf(method.Body, method.ExpressionBody);
+            else EmitFunctionBody(symbol, method.Body, method.ExpressionBody);
         });
         _inIterator = previousIterator;
 
         Out.WriteLine("}");
+    }
+
+    /// <summary>
+    /// The names a function hands back after its result, when it has <c>ref</c> or <c>out</c>
+    /// parameters; null otherwise. Set while emitting such a function's own body.
+    /// </summary>
+    private List<string>? _byRefReturn;
+
+    /// <summary>
+    /// Emits a method or local function body, rewriting <c>ref</c> and <c>out</c> parameters.
+    /// <para>
+    /// JavaScript passes everything by value, so a by-reference parameter becomes part of the
+    /// result instead: every <c>return x</c> turns into <c>return [x, a, b]</c>, and the call
+    /// site writes the extra elements back into the variables it passed. That is exactly what the
+    /// caller observes in C# — the variables hold the callee's final values once it returns.
+    /// </para>
+    /// </summary>
+    private void EmitFunctionBody(IMethodSymbol symbol, BlockSyntax? body, ArrowExpressionClauseSyntax? expressionBody)
+    {
+        var byRef = symbol.Parameters.Where(p => p.RefKind is RefKind.Ref or RefKind.Out).ToList();
+        var previous = _byRefReturn;
+
+        if (byRef.Count == 0)
+        {
+            _byRefReturn = null;
+            EmitStatementsOf(body, expressionBody);
+            _byRefReturn = previous;
+            return;
+        }
+
+        var names = byRef.Select(p => NameResolver.Escape(p.Name)).ToList();
+        foreach (var parameter in byRef.Where(p => p.RefKind == RefKind.Out))
+            Out.WriteLine($"let {NameResolver.Escape(parameter.Name)};");
+
+        _byRefReturn = names;
+        var tail = string.Join(", ", names);
+
+        if (expressionBody is not null)
+        {
+            DeclareHoistedVariables(expressionBody.Expression);
+            Out.MapTo(expressionBody.Expression.GetLocation());
+            if (symbol.ReturnsVoid)
+            {
+                EmitExpression(expressionBody.Expression);
+                Out.WriteLine(";");
+                Out.WriteLine($"return [undefined, {tail}];");
+            }
+            else
+            {
+                Write("return [");
+                EmitExpressionAs(expressionBody.Expression, symbol.ReturnType);
+                Out.WriteLine($", {tail}];");
+            }
+        }
+        else if (body is not null)
+        {
+            EmitStatementsOf(body, null);
+
+            // A void method may simply run off its end; that is a return too.
+            if (symbol.ReturnsVoid && body.Statements.LastOrDefault() is not (ReturnStatementSyntax or ThrowStatementSyntax))
+                Out.WriteLine($"return [undefined, {tail}];");
+        }
+
+        _byRefReturn = previous;
     }
 
     private void EmitIndexer(IndexerDeclarationSyntax indexer)
@@ -690,6 +992,9 @@ public sealed partial class JsEmitter
         var first = true;
         foreach (var parameter in parameters.Parameters)
         {
+            // An out parameter is not passed in; the callee hands it back in its result tuple.
+            if (parameter.Modifiers.Any(SyntaxKind.OutKeyword)) continue;
+
             if (!first) Write(", ");
             first = false;
 
@@ -800,7 +1105,7 @@ public sealed partial class JsEmitter
         if (_ctx.TypeModules.TryGetValue(type.OriginalDefinition, out var module)
             && !string.Equals(module, _ctx.CurrentModule, StringComparison.OrdinalIgnoreCase))
         {
-            _ctx.UseImport(module, name, name);
+            _ctx.UseImport(ModulePaths.Relative(_ctx.CurrentModule, module), name, name);
         }
 
         return name;
@@ -810,6 +1115,10 @@ public sealed partial class JsEmitter
     {
         if (type is null) return "null";
         if (type.TypeKind == TypeKind.Enum) return "0";
+
+        // default(T) for a struct is a zeroed instance, never null.
+        if (IsDeclaredStruct(type) && type is INamedTypeSymbol structType)
+            return $"{ReferenceToType(structType)}.$default()";
 
         return TypeMap.ShapeOf(type) switch
         {
@@ -833,6 +1142,15 @@ public sealed partial class JsEmitter
         var symbol = _ctx.Model.GetDeclaredSymbol(member);
         return symbol is not null && HasAttribute(symbol, "JsIgnoreAttribute");
     }
+
+    /// <summary>True when whole-program analysis found a member nothing references.</summary>
+    private bool IsRemoved(MemberDeclarationSyntax member)
+        => _ctx.Model.GetDeclaredSymbol(member) is { } symbol && IsRemoved(symbol);
+
+    private bool IsRemoved(ISymbol symbol) => _ctx.Analysis.UnusedPrivateMembers.Contains(symbol.OriginalDefinition);
+
+    /// <summary>True for an enum written as plain numbers, with no runtime object.</summary>
+    private bool IsInlinedEnum(INamedTypeSymbol type) => _ctx.Analysis.InlinedEnums.Contains(type.OriginalDefinition);
 
     /// <summary>
     /// True when a parameter comes from a primary constructor, and so was emitted as a field.

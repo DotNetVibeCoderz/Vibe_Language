@@ -15,6 +15,9 @@ public sealed class SourceMapBuilder
 
     private readonly record struct Segment(int GeneratedColumn, int SourceIndex, int SourceLine, int SourceColumn);
 
+    /// <summary>Written as the map's <c>sourceRoot</c>, which consumers prefix onto every source path.</summary>
+    public string SourceRoot { get; set; } = "";
+
     /// <summary>Registers a source file and returns its index.</summary>
     public int AddSource(string path, string? content)
     {
@@ -55,7 +58,7 @@ public sealed class SourceMapBuilder
     {
         var sb = new StringBuilder();
         sb.Append("{\"version\":3,\"file\":").Append(JsonString(generatedFileName));
-        sb.Append(",\"sourceRoot\":\"\",\"sources\":[");
+        sb.Append(",\"sourceRoot\":").Append(JsonString(SourceRoot)).Append(",\"sources\":[");
         for (var i = 0; i < _sources.Count; i++)
         {
             if (i > 0) sb.Append(',');
