@@ -57,6 +57,8 @@ public sealed partial class BuildRunner
         // CSJS.Testing ships with the CLI, so a project can write tests without configuring a
         // reference for something the toolchain already carries.
         options.AdditionalReferences.Add(typeof(CSJS.Testing.Assert).Assembly.Location);
+        // CSJS.Web — the whole web platform as typed C# — ships with the CLI the same way.
+        options.AdditionalReferences.Add(typeof(CSJS.Web.Dom).Assembly.Location);
 
         if (TryUpToDate(documents, options, sourceRoot, quiet, stopwatch) is { } upToDate) return upToDate;
 

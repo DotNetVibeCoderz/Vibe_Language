@@ -67,6 +67,13 @@ internal static class MsBuildCommands
             options.DefineConstants.Add(symbol);
 
         options.AdditionalReferences.Add(typeof(CSJS.Testing.Assert).Assembly.Location);
+        options.AdditionalReferences.Add(typeof(CSJS.Web.Dom).Assembly.Location);
+
+        // The project's own references — a class library of shared models, another binding
+        // package. Framework reference assemblies are filtered out by the targets: the transpiler
+        // binds against its own framework set, and two copies would give one type two identities.
+        if (Option(args, "--references") is { } referenceList)
+            options.AdditionalReferences.AddRange(ReadList(referenceList));
 
         var result = new Transpiler(options).Transpile(documents);
 

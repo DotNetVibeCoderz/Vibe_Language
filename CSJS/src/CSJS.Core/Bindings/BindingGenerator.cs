@@ -28,6 +28,15 @@ public sealed class BindingOptions
     public string? ContainerName { get; set; }
 
     /// <summary>
+    /// Generating the web platform itself, from <c>lib.dom.d.ts</c> (<c>@types/web</c>). DOM names
+    /// are then generated rather than mapped onto CSJS.Interop's hand-written <c>Element</c> and
+    /// <c>Event</c>, the file does not import <c>CSJS.Browser</c>, and the ES typed arrays the
+    /// platform uses (<c>Uint8Array</c>, <c>ArrayBuffer</c>, …) are assumed to be declared beside it,
+    /// as <c>CSJS.Web</c> declares them.
+    /// </summary>
+    public bool Platform { get; set; }
+
+    /// <summary>
     /// Resolves another declaration file: the importing file's path and the specifier it used.
     /// Relative specifiers point inside the package, bare ones at another package. Without a
     /// resolver, <c>export * from</c> and imported types are reported rather than followed.

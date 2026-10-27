@@ -1,4 +1,8 @@
 <Solution>
+  <Folder Name="/gallery/">
+    <Project Path="gallery/CSJS.Gallery.Client/CSJS.Gallery.Client.csproj" />
+    <Project Path="gallery/CSJS.Gallery/CSJS.Gallery.csproj" />
+  </Folder>
   <Folder Name="/playground/">
     <Project Path="playground/CSJS.Playground.csproj" />
   </Folder>
@@ -10,6 +14,7 @@
     <Project Path="src/CSJS.Interop/CSJS.Interop.csproj" />
     <Project Path="src/CSJS.LanguageService/CSJS.LanguageService.csproj" />
     <Project Path="src/CSJS.Testing/CSJS.Testing.csproj" />
+    <Project Path="src/CSJS.Web/CSJS.Web.csproj" />
     <Project Path="src/CSJS.Templates/CSJS.Templates.csproj" />
     <Project Path="src/CSJSGen/CSJSGen.csproj" />
   </Folder>

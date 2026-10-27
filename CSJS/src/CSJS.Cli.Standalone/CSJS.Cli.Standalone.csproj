@@ -26,6 +26,7 @@
     <ProjectReference Include="..\CSJS.Core\CSJS.Core.csproj" />
     <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
     <ProjectReference Include="..\CSJS.Testing\CSJS.Testing.csproj" />
+    <ProjectReference Include="..\CSJS.Web\CSJS.Web.csproj" />
     <!-- `cs2js lsp`: the language server shares its engine with CSJSGen. -->
     <ProjectReference Include="..\CSJS.LanguageService\CSJS.LanguageService.csproj" />
   </ItemGroup>

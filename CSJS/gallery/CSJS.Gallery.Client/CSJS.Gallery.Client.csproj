@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    The gallery's browser side, written in C#. Everything that runs in the page — the shell, the
+    router, the syntax highlighter, the source-map reader, and every demo — is in src/ and is
+    transpiled into ../CSJS.Gallery/wwwroot/js on each build.
+
+    Outside this repository a project would reference the CSJS.Build package. Here the same props
+    and targets are imported from source and pointed at the CLI built from this repository, so
+    the gallery always exercises the transpiler as it is now.
+    Gravicode Studios — led by Kang Fadhil.
+  -->
+
+  <Import Project="..\..\src\CSJS.Build\build\CSJS.Build.props" />
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>CSJS.Gallery.Client</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <!-- Fire-and-forget async is how a UI starts work from an event handler. -->
+    <NoWarn>$(NoWarn);CS4014</NoWarn>
+
+    <CsjsSourceRoot>src</CsjsSourceRoot>
+    <CsjsOutputPath>../CSJS.Gallery/wwwroot/js/</CsjsOutputPath>
+    <CsjsToolPath>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../../src/CSJS.Cli/bin/$(Configuration)/net10.0/cs2js.dll'))</CsjsToolPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CSJS.Interop\CSJS.Interop.csproj" />
+    <ProjectReference Include="..\..\src\CSJS.Web\CSJS.Web.csproj" />
+    <!-- Built first so CsjsToolPath exists; never loaded by this project. -->
+    <ProjectReference Include="..\..\src\CSJS.Cli\CSJS.Cli.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Import Project="..\..\src\CSJS.Build\build\CSJS.Build.targets" />
+
+</Project>

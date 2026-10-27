@@ -25,13 +25,14 @@
   <Target Name="CsjsTranspile"
           AfterTargets="CoreCompile"
           Condition="'$(CsjsEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'"
-          Inputs="@(Compile);$(MSBuildProjectFullPath);$(CsjsToolPath)"
+          Inputs="@(Compile);@(ReferencePath);$(MSBuildProjectFullPath);$(CsjsToolPath)"
           Outputs="$(IntermediateOutputPath)csjs.stamp">
 
     <PropertyGroup>
       <_CsjsIntermediate>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(IntermediateOutputPath)'))</_CsjsIntermediate>
       <_CsjsSourcesFile>$(IntermediateOutputPath)csjs.sources</_CsjsSourcesFile>
       <_CsjsSupportFile>$(IntermediateOutputPath)csjs.support</_CsjsSupportFile>
+      <_CsjsReferencesFile>$(IntermediateOutputPath)csjs.references</_CsjsReferencesFile>
       <_CsjsFlags></_CsjsFlags>
       <_CsjsFlags Condition="'$(CsjsTypeDefinitions)' != 'true'">$(_CsjsFlags) --no-dts</_CsjsFlags>
       <_CsjsFlags Condition="'$(CsjsSourceMaps)' != 'true'">$(_CsjsFlags) --no-maps</_CsjsFlags>
@@ -47,13 +48,21 @@
     <ItemGroup>
       <_CsjsSupport Include="@(Compile)" Condition="$([System.String]::Copy('%(Compile.FullPath)').StartsWith('$(_CsjsIntermediate)', StringComparison.OrdinalIgnoreCase))" />
       <_CsjsSource Include="@(Compile)" Exclude="@(_CsjsSupport)" />
+
+      <!--
+        The project's own references: a shared class library, another binding package. The
+        framework's reference assemblies are left out — the transpiler binds against its own
+        framework set, and a second copy would give one type two identities.
+      -->
+      <_CsjsReference Include="@(ReferencePath)" Condition="'%(ReferencePath.FrameworkReferenceName)' == ''" />
     </ItemGroup>
 
     <WriteLinesToFile File="$(_CsjsSourcesFile)" Lines="@(_CsjsSource->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
     <WriteLinesToFile File="$(_CsjsSupportFile)" Lines="@(_CsjsSupport->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
+    <WriteLinesToFile File="$(_CsjsReferencesFile)" Lines="@(_CsjsReference->'%(FullPath)')" Overwrite="true" WriteOnlyWhenDifferent="true" />
 
     <!-- Diagnostics are printed in canonical form, so Exec turns them into build errors. -->
-    <Exec Command="dotnet exec &quot;$(CsjsToolPath)&quot; compile --project-dir &quot;$(MSBuildProjectDirectory)&quot; --out &quot;$(CsjsOutputPath)&quot; --name &quot;$(AssemblyName)&quot; --module $(CsjsModule) --source-root &quot;$(CsjsSourceRoot)&quot; --sources &quot;$(_CsjsSourcesFile)&quot; --support &quot;$(_CsjsSupportFile)&quot; --define &quot;$(DefineConstants)&quot;$(_CsjsFlags)"
+    <Exec Command="dotnet exec &quot;$(CsjsToolPath)&quot; compile --project-dir &quot;$(MSBuildProjectDirectory)&quot; --out &quot;$(CsjsOutputPath)&quot; --name &quot;$(AssemblyName)&quot; --module $(CsjsModule) --source-root &quot;$(CsjsSourceRoot)&quot; --sources &quot;$(_CsjsSourcesFile)&quot; --support &quot;$(_CsjsSupportFile)&quot; --references &quot;$(_CsjsReferencesFile)&quot; --define &quot;$(DefineConstants)&quot;$(_CsjsFlags)"
           WorkingDirectory="$(MSBuildProjectDirectory)"
           StandardOutputImportance="normal"
           IgnoreExitCode="true">
@@ -70,7 +79,7 @@
     <Touch Files="$(IntermediateOutputPath)csjs.stamp" AlwaysCreate="true" />
 
     <ItemGroup>
-      <FileWrites Include="$(IntermediateOutputPath)csjs.stamp;$(_CsjsSourcesFile);$(_CsjsSupportFile)" />
+      <FileWrites Include="$(IntermediateOutputPath)csjs.stamp;$(_CsjsSourcesFile);$(_CsjsSupportFile);$(_CsjsReferencesFile)" />
     </ItemGroup>
   </Target>
 

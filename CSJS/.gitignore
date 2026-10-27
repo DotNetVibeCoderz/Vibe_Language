@@ -20,3 +20,6 @@ src/CSJSGen/app.config
 .vs/
 .idea/
 *.swp
+
+# Gallery: the browser code is transpiled into wwwroot/js on every build.
+gallery/CSJS.Gallery/wwwroot/js/

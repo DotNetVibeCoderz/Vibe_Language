@@ -1,0 +1,33 @@
+syntax = "proto3";
+
+option csharp_namespace = "CSJS.Gallery.Grpc";
+
+package csjs.gallery;
+
+// The service the gRPC-Web playground calls. The browser side frames and parses these messages
+// by hand in C# — five-byte frame headers and protobuf varints — so the wire format is visible.
+service Greeter {
+  // Unary: one request, one reply.
+  rpc SayHello (HelloRequest) returns (HelloReply);
+
+  // Server streaming: one request, a reply every few hundred milliseconds.
+  rpc Countdown (CountdownRequest) returns (stream Tick);
+}
+
+message HelloRequest {
+  string name = 1;
+}
+
+message HelloReply {
+  string message = 1;
+  int32 length = 2;
+}
+
+message CountdownRequest {
+  int32 from = 1;
+}
+
+message Tick {
+  int32 remaining = 1;
+  string label = 2;
+}

@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CSJS Gallery — C# that runs as JavaScript</title>
+  <meta name="description" content="Live demos of the web platform written in C# and transpiled by CSJS, each beside the JavaScript it became." />
+  <link rel="icon" type="image/png" href="img/icon.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,400..800&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;600&family=Martian+Mono:wdth,wght@75..112,400..600&display=swap" />
+  <link rel="stylesheet" href="css/gallery.css" />
+  <!-- Bare specifiers used by generated bindings (cs2js add) resolve to ES module builds. -->
+  <script type="importmap">
+    {
+      "imports": {
+        "@microsoft/signalr": "https://esm.sh/@microsoft/signalr@10.0.0",
+        "socket.io-client": "https://esm.sh/socket.io-client@4.8.1"
+      }
+    }
+  </script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <div class="shell">
+    <nav class="rail" aria-label="Demos">
+      <a class="brand" href="#/">
+        <span class="brand-mark" aria-hidden="true"><i></i></span>
+        <span class="brand-word">CSJS</span>
+        <span class="brand-sub">Gallery</span>
+      </a>
+
+      <div id="rail-index" class="rail-index"></div>
+
+      <footer class="rail-foot">
+        <a href="https://github.com/DotNetVibeCoderz/Vibe_Language/tree/main/CSJS">Source</a>
+        <a href="https://www.nuget.org/packages/CSJS.Templates">Templates</a>
+        <span class="rail-version">v0.2</span>
+      </footer>
+    </nav>
+
+    <main id="main" class="main" tabindex="-1">
+      <p class="booting">Loading the gallery…</p>
+    </main>
+  </div>
+
+  <script type="module">
+    import { GalleryApp } from './js/Shell/GalleryApp.js';
+    GalleryApp.Start();
+  </script>
+</body>
+</html>

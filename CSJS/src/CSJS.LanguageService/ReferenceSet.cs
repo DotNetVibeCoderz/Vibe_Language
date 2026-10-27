@@ -54,10 +54,10 @@ internal static class ReferenceSet
             }
         }
 
-        // CSJS.Interop carries the attributes and browser bindings; CSJS.Testing ships with the
-        // CLI so a project can write tests without configuring a reference. Both are usually in
-        // the TPA list already, which the name check accounts for.
-        foreach (var assembly in new[] { typeof(JsGlobalAttribute).Assembly, typeof(CSJS.Testing.Assert).Assembly })
+        // CSJS.Interop carries the attributes and browser bindings; CSJS.Testing and CSJS.Web ship
+        // with the CLI so a project can use them without configuring a reference. They are usually
+        // in the TPA list already, which the name check accounts for.
+        foreach (var assembly in new[] { typeof(JsGlobalAttribute).Assembly, typeof(CSJS.Testing.Assert).Assembly, typeof(CSJS.Web.Dom).Assembly })
         {
             var path = assembly.Location;
             if (path.Length > 0 && seen.Add(Path.GetFileName(path)))

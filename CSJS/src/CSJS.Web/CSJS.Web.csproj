@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    CSJS.Web: the whole web platform as typed C#.
+
+    Generated/Web.g.cs is produced by CSJS's own binding generator from @types/web — the same
+    lib.dom declarations TypeScript ships — so every interface the browser exposes is here, with
+    MDN documentation on each member. The hand-written files beside it add what lib.dom only
+    refers to (the ES typed arrays) and a few conveniences TypeScript expresses with overloads C#
+    cannot tell apart. See README.md for how to regenerate.
+
+    Declarations only: every body throws, and the transpiler turns each call into the JavaScript
+    it names. Nothing in this assembly runs on .NET.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>CSJS.Web</RootNamespace>
+    <AssemblyName>CSJS.Web</AssemblyName>
+    <PackageId>CSJS.Web</PackageId>
+    <Description>The complete web platform as typed C# for CSJS, the C#-to-JavaScript transpiler: every DOM, CSSOM, Canvas, WebGL, WebGPU, Web Audio, media, storage, network, device, worker, and crypto API in lib.dom, generated from @types/web with MDN docs on every member.</Description>
+    <PackageTags>$(PackageTags);browser;dom;web-api;canvas;webaudio;webgl;websocket;bindings</PackageTags>
+    <!-- Generated members mirror lib.dom's own redeclarations and naming. -->
+    <NoWarn>$(NoWarn);CS1591;CA1822;CS0108;CS0109;CS0114;CS8618;CS8714;CS0618</NoWarn>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
+  </ItemGroup>
+
+</Project>

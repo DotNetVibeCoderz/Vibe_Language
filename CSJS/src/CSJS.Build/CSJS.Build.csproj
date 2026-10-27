@@ -27,6 +27,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
+    <!-- The whole web platform as typed C#, so a CSJS.Build project can use any browser API. -->
+    <ProjectReference Include="..\CSJS.Web\CSJS.Web.csproj" />
     <None Include="build\**" Pack="true" PackagePath="build\" />
     <!-- buildTransitive lets a project that references a CSJS.Build project still transpile. -->
     <None Include="build\**" Pack="true" PackagePath="buildTransitive\" />

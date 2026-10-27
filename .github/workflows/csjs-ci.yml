@@ -162,12 +162,12 @@ jobs:
           fi
 
       # CSJS.Build packs a published copy of the CLI under tools/, and CSJS.Templates stamps its
-      # own version into every template's CSJS.Build reference — so all seven must share one
+      # own version into every template's CSJS.Build reference — so all eight must share one
       # version, which is why they are packed in one step with the same arguments.
       - name: Pack
         working-directory: ${{ steps.locate.outputs.dir }}
         run: |
-          for p in src/CSJS.Core src/CSJS.Interop src/CSJS.Testing src/CSJS.Cli src/CSJS.Cli.Standalone \
+          for p in src/CSJS.Core src/CSJS.Interop src/CSJS.Web src/CSJS.Testing src/CSJS.Cli src/CSJS.Cli.Standalone \
                    src/CSJS.Build src/CSJS.Templates; do
             dotnet pack "$p" -c Release ${{ steps.version.outputs.args }}
           done

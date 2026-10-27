@@ -41,7 +41,9 @@ internal static class PackageCommands
         {
             Module = Option(args, "--module"),
             Namespace = Option(args, "--namespace"),
-            Global = args.Contains("--global"),
+            Global = args.Contains("--global") || args.Contains("--platform"),
+            Platform = args.Contains("--platform"),
+            ContainerName = Option(args, "--container"),
             Resolve = new DiskResolver().Resolve,
         };
 

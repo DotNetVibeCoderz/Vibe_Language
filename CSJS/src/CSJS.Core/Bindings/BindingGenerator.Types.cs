@@ -249,12 +249,25 @@ public sealed partial class BindingGenerator
                     Note(context, $"'{Abbreviate(reference.ToString())}' is a plain object, not a Map; mapped to JsObject");
                     return "JsObject";
 
+                // The platform library declares the typed arrays itself; they are ES built-ins, so
+                // lib.dom only refers to them.
+                case "ArrayBuffer" or "SharedArrayBuffer" or "ArrayBufferLike" or "ArrayBufferView" or "DataView"
+                    or "Uint8Array" or "Uint8ClampedArray" or "Int8Array" or "Uint16Array" or "Int16Array"
+                    or "Uint32Array" or "Int32Array" or "Float32Array" or "Float64Array"
+                    or "BigInt64Array" or "BigUint64Array" when _options.Platform:
+                    return simple switch
+                    {
+                        "ArrayBufferLike" or "SharedArrayBuffer" => "ArrayBuffer",
+                        "ArrayBufferView" => "TypedArray",
+                        _ => simple,
+                    };
+
                 case "WeakMap" or "WeakSet" or "WeakRef" or "Error" or "RegExp" or "ArrayBuffer" or "Uint8Array" or "AbortSignal":
                     Note(context, $"'{simple}' has no binding; mapped to JsObject");
                     return "JsObject";
             }
 
-            if (KnownBrowserType(simple) is { } browser) return browser;
+            if (!_options.Platform && KnownBrowserType(simple) is { } browser) return browser;
         }
 
         Note(context, $"unknown type '{Abbreviate(reference.ToString())}' mapped to {Fallback(flow)}");
@@ -816,7 +829,7 @@ public sealed partial class BindingGenerator
     });
 
     /// <summary>Names the generated file uses from referenced namespaces, which a generated type must not shadow.</summary>
-    private static IEnumerable<string> BrowserTypeNames => BrowserTypes.Value.Values;
+    private IEnumerable<string> BrowserTypeNames => _options.Platform ? Array.Empty<string>() : BrowserTypes.Value.Values;
 
     private static string? KnownBrowserType(string tsName)
     {

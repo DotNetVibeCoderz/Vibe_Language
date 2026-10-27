@@ -823,6 +823,10 @@ public static class MemberMap
         const string sb = "System.Text.StringBuilder";
         Methods[$"{sb}.Append/1"] = new("{this}.append({0})", StringifyArguments: true);
         Methods[$"{sb}.Append(char,int)"] = new("{this}.append({0}.repeat({1}))");
+        // sb.Append($"…") binds to an interpolated-string-handler overload since C# 10; the
+        // argument is emitted as a template literal, so the handler is just a string here.
+        Methods[$"{sb}.Append(System.Text.StringBuilder.AppendInterpolatedStringHandler)"] = new("{this}.append({0})");
+        Methods[$"{sb}.AppendLine(System.Text.StringBuilder.AppendInterpolatedStringHandler)"] = new("{this}.appendLine({0})");
         Methods[$"{sb}.AppendLine/1"] = new("{this}.appendLine({0})", StringifyArguments: true);
         Methods[$"{sb}.AppendLine/0"] = new("{this}.appendLine('')");
         Methods[$"{sb}.AppendFormat/*"] = new("{this}.append(csjsFormat({...}))", Helper: "csjsFormat");

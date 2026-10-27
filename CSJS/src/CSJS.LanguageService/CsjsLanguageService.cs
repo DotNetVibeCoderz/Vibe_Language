@@ -535,6 +535,7 @@ public sealed class CsjsLanguageService : IDisposable
                 options.DefineConstants.AddRange(_options.DefineConstants);
                 options.AdditionalReferences.AddRange(_options.AdditionalReferences);
                 options.AdditionalReferences.Add(typeof(CSJS.Testing.Assert).Assembly.Location);
+                options.AdditionalReferences.Add(typeof(CSJS.Web.Dom).Assembly.Location);
 
                 try
                 {

@@ -353,14 +353,32 @@ public sealed partial class BindingGenerator
             }
         }
 
+        // A class declared the lib.dom way — `interface X extends Y, Mixin` plus a constructor
+        // variable — keeps its first class-like base as a real C# base class, so
+        // HTMLCanvasElement is an HTMLElement is an Element, and a cast between them compiles.
+        // Only the remaining mixins are folded in, minus any the base chain already carries.
+        var interfaceBase = declaration is null && type.Bases.Count == 0
+            ? entity.Interfaces.SelectMany(i => i.Extends)
+                .Select(b => (Reference: b, Entity: LookupQualified(entity.Owner, b.Name)))
+                .FirstOrDefault(b => b.Entity is not null && b.Entity != entity && Classify(b.Entity) == EntityKind.Class)
+            : default;
+
+        var alreadyInherited = new HashSet<Entity> { entity };
+        if (interfaceBase.Entity is { } inheritedEntity)
+        {
+            type.Bases.Add(Map(interfaceBase.Reference, Flow.Out, context));
+            type.BaseModels.Add(_entityTypes[inheritedEntity]);
+            foreach (var ancestor in InheritedEntities(inheritedEntity)) alreadyInherited.Add(ancestor);
+        }
+
         foreach (var c in entity.Classes) members.AddRange(c.Members);
         foreach (var i in entity.Interfaces)
         {
             members.AddRange(i.Members);
             foreach (var b in i.Extends)
             {
-                if (LookupQualified(entity.Owner, b.Name) is { } merged)
-                    members.AddRange(FlattenMembers(merged, new HashSet<Entity> { entity }));
+                if (LookupQualified(entity.Owner, b.Name) is { } merged && !alreadyInherited.Contains(merged))
+                    members.AddRange(FlattenMembers(merged, new HashSet<Entity>(alreadyInherited)));
             }
         }
 
@@ -491,6 +509,26 @@ public sealed partial class BindingGenerator
         TsObjectType => true,
         _ => false,
     };
+
+    /// <summary>
+    /// Every entity whose members a generated class already has through its C# base chain: the
+    /// class itself, the mixins folded into it, and the same for each base above it.
+    /// </summary>
+    private HashSet<Entity> InheritedEntities(Entity entity)
+    {
+        var result = new HashSet<Entity>();
+        void Visit(Entity current)
+        {
+            if (!result.Add(current)) return;
+            foreach (var i in current.Interfaces)
+                foreach (var b in i.Extends)
+                    if (LookupQualified(current.Owner, b.Name) is { } next) Visit(next);
+            if (current.Classes.FirstOrDefault()?.Extends is { } extends && LookupQualified(current.Owner, extends.Name) is { } baseClass)
+                Visit(baseClass);
+        }
+        Visit(entity);
+        return result;
+    }
 
     /// <summary>Every member of an interface and its bases, for folding into a type that cannot inherit them.</summary>
     private IEnumerable<TsMember> FlattenMembers(Entity entity, HashSet<Entity> visited)
@@ -1553,7 +1591,9 @@ public sealed partial class BindingGenerator
         sb.Append("using System.Collections.Generic;\n");
         sb.Append("using System.Threading.Tasks;\n");
         sb.Append("using CSJS;\n");
-        sb.Append("using CSJS.Browser;\n\n");
+        // The platform file generates its own Element and Event, so it takes only JsObject from
+        // CSJS.Browser rather than the whole namespace.
+        sb.Append(_options.Platform ? "using JsObject = CSJS.Browser.JsObject;\n\n" : "using CSJS.Browser;\n\n");
         sb.Append($"namespace {_namespace};\n");
 
         if (_skipped.Count > 0)

@@ -829,7 +829,7 @@ public sealed partial class JsEmitter
             return true;
         }
 
-        if (symbol.Parameters.Any(p => p.RefKind is RefKind.Out or RefKind.Ref)
+        if (symbol.Parameters.Any(p => p.RefKind is RefKind.Out or RefKind.Ref && !IsInterpolatedStringHandler(p.Type))
             && symbol.ContainingType?.ContainingAssembly?.Name != "CSJS.Interop")
         {
             // A method declared in this program hands its ref/out values back in its result.
@@ -890,6 +890,14 @@ public sealed partial class JsEmitter
         EmitArgumentList(invocation.ArgumentList.Arguments, symbol, skipOut: true);
         Write("))");
     }
+
+    /// <summary>
+    /// An interpolated string handler parameter (<c>ref AppendInterpolatedStringHandler</c>) is
+    /// passed by reference in C#, but its argument is an interpolated string — a template literal
+    /// here — so nothing is written back and the call is an ordinary one.
+    /// </summary>
+    private static bool IsInterpolatedStringHandler(ITypeSymbol type)
+        => type.GetAttributes().Any(a => a.AttributeClass?.Name == "InterpolatedStringHandlerAttribute");
 
     private bool IsDiscard(ExpressionSyntax expression) => expression switch
     {
@@ -1054,30 +1062,70 @@ public sealed partial class JsEmitter
         };
     }
 
+    /// <summary>
+    /// Argument emitters whose expression binds more loosely than a member access or a call — a
+    /// conditional, a binary operator, an assignment. Substituted next to an operator in a template
+    /// (<c>{0} ?? {1}</c>, <c>{0}.repeat(…)</c>) such an argument needs parentheses, or JavaScript's
+    /// precedence regroups it: <c>x ?? a > 0 ? b : c</c> is <c>(x ?? a > 0) ? b : c</c>.
+    /// </summary>
+    private readonly HashSet<Action> _looseArguments = new();
+
+    private static bool BindsLoosely(ExpressionSyntax? expression) => expression is
+        ConditionalExpressionSyntax or BinaryExpressionSyntax or AssignmentExpressionSyntax
+        or PrefixUnaryExpressionSyntax or AwaitExpressionSyntax or CastExpressionSyntax
+        or IsPatternExpressionSyntax or ConditionalAccessExpressionSyntax
+        or AnonymousFunctionExpressionSyntax or ThrowExpressionSyntax;
+
     private List<Action> BuildArgumentEmitters(
         SeparatedSyntaxList<ArgumentSyntax> arguments, IMethodSymbol? target, bool stringify = false, bool spreadParams = false)
         => OrderArguments(arguments, target)
-            .Select(pair => (Action)(() =>
+            .Select(pair =>
             {
-                // An array handed to a params parameter in non-expanded form is the whole
-                // argument list, so a `[{...}]` template must receive its elements, not the array.
-                var spread = spreadParams && pair.Parameter?.IsParams == true && pair.Argument.Expression is not null
-                             && _ctx.TypeFor(pair.Argument.Expression) is IArrayTypeSymbol
-                             && arguments.Count == target!.Parameters.Length;
-                if (spread) Write("...");
-
-                if (pair.Argument.Expression is null) Write(DefaultValueFor(pair.Parameter?.Type));
-                // A spread array is the argument list itself; its elements are converted where used.
-                else if (stringify && !spread) EmitStringified(pair.Argument.Expression);
-                else EmitExpressionAs(pair.Argument.Expression, pair.Parameter?.Type);
-            }))
+                Action emit = () => EmitTemplateArgument(pair, arguments, target, stringify, spreadParams);
+                if (BindsLoosely(pair.Argument.Expression)) _looseArguments.Add(emit);
+                return emit;
+            })
             .ToList();
+
+    private void EmitTemplateArgument(
+        (ArgumentSyntax Argument, IParameterSymbol? Parameter) pair, SeparatedSyntaxList<ArgumentSyntax> arguments,
+        IMethodSymbol? target, bool stringify, bool spreadParams)
+    {
+        // An array handed to a params parameter in non-expanded form is the whole
+        // argument list, so a `[{...}]` template must receive its elements, not the array.
+        var spread = spreadParams && pair.Parameter?.IsParams == true && pair.Argument.Expression is not null
+                     && _ctx.TypeFor(pair.Argument.Expression) is IArrayTypeSymbol
+                     && arguments.Count == target!.Parameters.Length;
+        if (spread) Write("...");
+
+        if (pair.Argument.Expression is null) Write(DefaultValueFor(pair.Parameter?.Type));
+        // A spread array is the argument list itself; its elements are converted where used.
+        else if (stringify && !spread) EmitStringified(pair.Argument.Expression);
+        else EmitExpressionAs(pair.Argument.Expression, pair.Parameter?.Type);
+    }
 
     /// <summary>
     /// True when an expression evaluates to an array nothing else holds a reference to, so a
     /// template that must hand back a copy (<c>ToList</c>) can use it as it is. Every LINQ call
     /// builds a new array, except the pass-throughs that return their receiver.
     /// </summary>
+    /// <summary>
+    /// True when a placeholder stands alone as an argument or element — bounded by <c>(</c>,
+    /// <c>,</c>, or <c>[</c> before and <c>)</c>, <c>,</c>, or <c>]</c> after — so whatever is
+    /// substituted cannot be regrouped by the operators around it.
+    /// </summary>
+    private static bool IsIsolated(string pattern, int open, int afterClose)
+    {
+        var before = open - 1;
+        while (before >= 0 && pattern[before] == ' ') before--;
+        var after = afterClose;
+        while (after < pattern.Length && pattern[after] == ' ') after++;
+
+        var openOk = before < 0 || pattern[before] is '(' or ',' or '[';
+        var closeOk = after >= pattern.Length || pattern[after] is ')' or ',' or ']';
+        return openOk && closeOk;
+    }
+
     private static readonly System.Text.RegularExpressions.Regex HelperReference =
         new(@"\bcsjs[A-Z]\w*(?=\()", System.Text.RegularExpressions.RegexOptions.Compiled);
 
@@ -1133,6 +1181,7 @@ public sealed partial class JsEmitter
             }
 
             var token = pattern.Substring(i + 1, close - i - 1);
+            var open = i;
             i = close + 1;
 
             if (token == "this")
@@ -1182,12 +1231,23 @@ public sealed partial class JsEmitter
 
             if (int.TryParse(token, out var index))
             {
-                if (index < emitArgs.Count) emitArgs[index]();
-                else Write("undefined");
+                if (index >= emitArgs.Count)
+                {
+                    Write("undefined");
+                    continue;
+                }
+
+                var wrap = _looseArguments.Contains(emitArgs[index]) && !IsIsolated(pattern, open, i);
+                if (wrap) Write("(");
+                emitArgs[index]();
+                if (wrap) Write(")");
                 continue;
             }
 
-            Write("{" + token + "}");
+            // Not a placeholder: a literal brace, as in an object literal `{ a: {0} }`. Only the
+            // brace itself is written, so placeholders inside it are still substituted.
+            Write("{");
+            i = open + 1;
         }
     }
 

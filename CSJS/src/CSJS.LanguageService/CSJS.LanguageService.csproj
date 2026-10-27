@@ -21,6 +21,7 @@
     <ProjectReference Include="..\CSJS.Core\CSJS.Core.csproj" />
     <ProjectReference Include="..\CSJS.Interop\CSJS.Interop.csproj" />
     <ProjectReference Include="..\CSJS.Testing\CSJS.Testing.csproj" />
+    <ProjectReference Include="..\CSJS.Web\CSJS.Web.csproj" />
   </ItemGroup>
 
 </Project>
