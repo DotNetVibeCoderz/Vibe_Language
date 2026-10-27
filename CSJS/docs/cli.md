@@ -317,7 +317,7 @@ global tool installed:
     <CsjsOutputPath>wwwroot/js/</CsjsOutputPath>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="CSJS.Build" Version="0.2.0" />
+    <PackageReference Include="CSJS.Build" Version="0.3.0" />
   </ItemGroup>
 </Project>
 ```

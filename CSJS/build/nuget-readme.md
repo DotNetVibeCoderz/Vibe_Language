@@ -46,6 +46,7 @@ globalThis.App = App;
 | --- | --- |
 | `CSJS.Core` | The engine: Roslyn front end, JavaScript emitter, `.d.ts` emitter, source maps. |
 | `CSJS.Interop` | Interop attributes and typed browser bindings. Reference this from your client code. |
+| `CSJS.Web` | The whole web platform as typed C# — every `lib.dom` interface, 1,464 types, with MDN docs. |
 | `CSJS.Cli` | `dotnet cs2js build` — build, run, watch, serve, new. |
 | `CSJS.Cli.Standalone` | The same tool under the shorter `cs2js` command. |
 | `CSJS.Testing` | Write tests in C#, run them on a JavaScript runtime. |

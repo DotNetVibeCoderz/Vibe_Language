@@ -6,10 +6,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ```bash
 dotnet build CSJS.slnx                                    # everything; currently warning-free
-dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj  # 213 tests
+dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj  # 229 tests
 dotnet test tests/CSJS.Core.Tests/CSJS.Core.Tests.csproj --filter "FullyQualifiedName~IntegerDivisionTruncates"
 dotnet run --project src/CSJSGen                          # the desktop editor (Windows only)
 dotnet run --project playground                           # the browser playground
+dotnet run --project gallery/CSJS.Gallery                 # the demo gallery + API playground server
 ```
 
 The CLI is installed as a global tool and both invocations work:
@@ -41,6 +42,7 @@ Bahasa Indonesia); `docs/architecture.md` describes what was actually built and 
 | --- | --- |
 | `src/CSJS.Core` | The engine. Roslyn front end, JS emitter, `.d.ts` emitter, source maps. |
 | `src/CSJS.Interop` | Interop attributes and browser bindings. Referenced by user code. |
+| `src/CSJS.Web` | The whole web platform as C#, generated from `@types/web`. Never edit `Generated/Web.g.cs`. |
 | `src/CSJS.Cli` / `.Standalone` | `dotnet cs2js` and `cs2js`. Same sources, two tool command names. |
 | `src/CSJS.Build` | MSBuild package: `dotnet build` transpiles a `.csproj`. Packs the CLI under `tools/`. |
 | `src/CSJS.Templates` | `dotnet new` template pack built from `templates/`. |
@@ -48,6 +50,7 @@ Bahasa Indonesia); `docs/architecture.md` describes what was actually built and 
 | `src/CSJS.Testing` | C# tests transpiled and run on Node. |
 | `src/CSJSGen` | Avalonia + Blazor desktop editor with the Semantic Kernel assistant. |
 | `playground` | `CSJS.Core` under WebAssembly. |
+| `gallery/` | Showcase app: C# demos of browser APIs + an API playground server (REST, gRPC-Web, SignalR, Socket.IO, WebSocket, SSE). |
 | `tests/CSJS.Core.Tests` | Emission tests and semantics tests. |
 
 ## Engine architecture
@@ -148,6 +151,19 @@ assets included. Running on Node cannot show a page — Node has no DOM, so anyt
 Reasoning models (o-series, gpt-5) reject `temperature`, `top_p`, and `max_tokens` outright —
 `KernelFactory.IsReasoningModel` routes them to `max_completion_tokens` via `ExtraBody`. Sending
 the ordinary settings to one is a 400, not a degraded answer.
+
+## CSJS.Web and the Gallery
+
+`src/CSJS.Web/Generated/Web.g.cs` is produced by `cs2js bind <@types/web index.d.ts> --platform
+--namespace CSJS.Web --container Js` — see `src/CSJS.Web/README.md`. A wrong binding is fixed in
+the generator (`src/CSJS.Core/Bindings/`) and regenerated, never patched by hand. TypeScript
+generics C# cannot express (tag-name maps, `getContext` overloads) get typed helpers in `Dom.cs`.
+
+The gallery client (`gallery/CSJS.Gallery.Client`) imports CSJS.Build's props/targets from source
+and points `CsjsToolPath` at the CLI built from this repo, so it always tests the current engine.
+Its `wwwroot/js` is build output and is gitignored. A new demo is one `Demo` subclass plus one line
+in `Catalog.All`; `Unmount` must stop everything `Mount` started. Check demos in a real browser —
+headless Chrome over the DevTools protocol — because most browser APIs cannot run on Node.
 
 ## Playground notes
 

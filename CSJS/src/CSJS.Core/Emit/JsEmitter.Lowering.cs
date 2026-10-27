@@ -502,7 +502,10 @@ public sealed partial class JsEmitter
         }
 
         // Only types this program declares have a constructor and properties worth describing.
-        if (named.DeclaringSyntaxReferences.Length == 0 || named.TypeKind is not (TypeKind.Class or TypeKind.Struct))
+        // An anonymous type is emitted as an object literal whose keys are already the property
+        // names, and it has no constructor to name — it is plain JSON as it stands.
+        if (named.DeclaringSyntaxReferences.Length == 0 || named.IsAnonymousType || named.IsTupleType
+            || named.TypeKind is not (TypeKind.Class or TypeKind.Struct))
             return "null";
         if (HasAttribute(named, "JsObjectLiteralAttribute")) return "null";
 

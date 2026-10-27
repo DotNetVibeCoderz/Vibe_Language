@@ -73,10 +73,45 @@ public sealed partial class JsEmitter
         Out.InBlock(() =>
         {
             DeclareHoistedVariables(block);
+            BindLocalFunctions(block);
             foreach (var statement in block.Statements)
                 EmitStatement(statement);
         });
         Write("}");
+    }
+
+    /// <summary>
+    /// A local function becomes a JavaScript <c>function</c> declaration, which has its own
+    /// <c>this</c> — undefined when called plainly. One that reaches the instance is rebound at
+    /// the top of its block. Declarations are hoisted to the block's start, so the binding is in
+    /// place before any call, including calls written above the local function, as C# allows.
+    /// </summary>
+    private void BindLocalFunctions(BlockSyntax block)
+    {
+        foreach (var local in block.Statements.OfType<LocalFunctionStatementSyntax>())
+        {
+            if (local.Modifiers.Any(SyntaxKind.StaticKeyword) || !UsesInstance(local)) continue;
+            var name = NameResolver.Escape(local.Identifier.Text);
+            Out.WriteLine($"{name} = {name}.bind(this);");
+        }
+    }
+
+    /// <summary>True when a local function mentions <c>this</c>, <c>base</c>, or an instance member.</summary>
+    private bool UsesInstance(LocalFunctionStatementSyntax local)
+    {
+        foreach (var node in local.DescendantNodes())
+        {
+            if (node is ThisExpressionSyntax or BaseExpressionSyntax) return true;
+            if (node is not SimpleNameSyntax name) continue;
+            // `x.Member` is reached through x; only a bare name can mean `this.Member`.
+            if (name.Parent is MemberAccessExpressionSyntax access && access.Name == name) continue;
+            var symbol = _ctx.Model.GetSymbolInfo(name).Symbol;
+            if (symbol is { IsStatic: false, Kind: SymbolKind.Field or SymbolKind.Property or SymbolKind.Method or SymbolKind.Event }
+                && symbol.ContainingType is not null
+                && !(symbol is IMethodSymbol { MethodKind: MethodKind.LocalFunction }))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -132,6 +167,10 @@ public sealed partial class JsEmitter
             .Select(d => NameResolver.Escape(d.Identifier.Text))
             .Distinct(StringComparer.Ordinal)
             .ToList();
+
+        // `out _` writes to a sink rather than to a variable named `_`.
+        if (nodes.OfType<ArgumentSyntax>().Any(a => a.RefKindKeyword.IsKind(SyntaxKind.OutKeyword) && IsDiscard(a.Expression)))
+            names.Add(DiscardSink);
 
         // Emitted modules are ESM and therefore strict, so an undeclared assignment is a
         // ReferenceError rather than an implicit global.

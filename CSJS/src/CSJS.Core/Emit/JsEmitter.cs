@@ -127,6 +127,14 @@ public sealed partial class JsEmitter
                     break;
 
                 case TypeDeclarationSyntax or EnumDeclarationSyntax:
+                    // A nested type becomes a module-level class beside its container, under the
+                    // flattened name NameResolver gave it — JavaScript classes cannot nest, and
+                    // every reference already goes through that name. It comes first, because the
+                    // container's static initialisers (`static Cities = [new City(…)]`) run as
+                    // the container's class declaration evaluates.
+                    if (member is TypeDeclarationSyntax container)
+                        foreach (var nested in CollectTypeDeclarations(container)) yield return nested;
+
                     yield return member;
                     break;
             }
@@ -261,8 +269,11 @@ public sealed partial class JsEmitter
         if (declaration.ParameterList is { } primaryParameters)
             EmitPrimaryConstructor(primaryParameters, symbol, declaration is RecordDeclarationSyntax);
 
+        // A static constructor is not a member: EmitStaticInitializer runs its body once, after
+        // the class, as the module evaluates.
         foreach (var constructor in members.OfType<ConstructorDeclarationSyntax>())
-            EmitConstructor(constructor, symbol);
+            if (!constructor.Modifiers.Any(SyntaxKind.StaticKeyword))
+                EmitConstructor(constructor, symbol);
 
         // A class with fields but no constructor still needs one when it has a base type,
         // otherwise JavaScript's implicit constructor forwards arguments it should not.
@@ -1034,6 +1045,7 @@ public sealed partial class JsEmitter
         if (body is not null)
         {
             DeclareHoistedVariables(body);
+            BindLocalFunctions(body);
             foreach (var statement in body.Statements)
                 EmitStatement(statement);
             return;

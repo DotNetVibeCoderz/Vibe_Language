@@ -764,4 +764,251 @@ public class SemanticsTests
 
         Assert.Equal("Teh, Susu\n60000", output);
     }
+
+    [Fact]
+    public void UndefinedFromInteropIsNull()
+    {
+        // A library callback or a missing property hands C# `undefined`, not `null`. C# has one
+        // null, so every null test must accept both. Expected output is from running this program
+        // on .NET, where Missing() returns null.
+        var output = Js.Run("""
+            using System;
+            using CSJS;
+
+            public static class Program
+            {
+                [JsTemplate("undefined")]
+                private static string? Missing() => null;
+
+                public static void Main()
+                {
+                    var s = Missing();
+                    Console.WriteLine(s is null);
+                    Console.WriteLine(s is not null);
+                    Console.WriteLine(s == null);
+                    Console.WriteLine(s != null);
+                    Console.WriteLine(null == s);
+                    Console.WriteLine(s is { } ? "some" : "none");
+                    Console.WriteLine(s ?? "fallback");
+                }
+            }
+            """);
+
+        Assert.Equal("True\nFalse\nTrue\nFalse\nTrue\nnone\nfallback", output);
+    }
+
+    [Fact]
+    public void LocalFunctionsReachTheInstance()
+    {
+        // A local function is a JavaScript function declaration, whose `this` is undefined when
+        // called plainly. One that touches instance state must still see it — including when it
+        // is called above its declaration. Expected output from running this program on .NET.
+        var output = Js.Run("""
+            using System;
+
+            public class Counter
+            {
+                private int _count = 10;
+
+                private int Bump() => ++_count;
+
+                public string Run()
+                {
+                    var early = Next(5);
+
+                    int Next(int step)
+                    {
+                        _count += step;
+                        return _count;
+                    }
+
+                    int Both() => Next(1) + Bump();
+
+                    static int Pure(int x) => x * 2;
+
+                    Func<int> later = () => Next(0) + this._count;
+                    return $"{early} {Both()} {Pure(_count)} {later()}";
+                }
+            }
+
+            public static class Program
+            {
+                public static void Main() => Console.WriteLine(new Counter().Run());
+            }
+            """);
+
+        Assert.Equal("15 33 34 34", output);
+    }
+
+    [Fact]
+    public void InterpolatedStringBraceEscapesAreSingleBraces()
+    {
+        // `{{` and `}}` in a regular interpolated string are one brace each; a raw string with
+        // `$$` has no escapes at all. Expected output from running this program on .NET.
+        var output = Js.Run(""""
+            using System;
+
+            public static class Program
+            {
+                public static void Main()
+                {
+                    var name = "Ada";
+                    var n = 3;
+                    Console.WriteLine($"Reply {{ name: \"{name}\", n: {n} }}");
+                    Console.WriteLine($"{{{n}}}");
+                    Console.WriteLine($$"""{ "raw": {{n}} }""");
+                }
+            }
+            """");
+
+        Assert.Equal("Reply { name: \"Ada\", n: 3 }\n{3}\n{ \"raw\": 3 }", output);
+    }
+
+    [Fact]
+    public void MethodGroupsKeepTheirTarget()
+    {
+        // A method group converted to a delegate carries its receiver, and the same group is the
+        // same delegate — so `-=` removes what `+=` added. Expected output is from .NET.
+        var output = Js.Run("""
+            using System;
+            using System.Collections.Generic;
+
+            public class Counter
+            {
+                private int _count;
+                private readonly string _name;
+                public event Action? Ticked;
+                public Counter(string name) => _name = name;
+                public void Tick() { _count++; Ticked?.Invoke(); }
+                public string Report() => $"{_name}: {_count}";
+                public void Subscribe() { Ticked += OnTicked; Ticked += OnTicked; Ticked -= OnTicked; }
+                private void OnTicked() => Console.WriteLine($"ticked {_name} {_count}");
+            }
+
+            public static class Program
+            {
+                public static void Main()
+                {
+                    var a = new Counter("a");
+                    Action tick = a.Tick;
+                    Func<string> report = a.Report;
+                    tick();
+                    tick();
+                    Console.WriteLine(report());
+                    a.Subscribe();
+                    a.Tick();
+                    var actions = new List<Action> { new Counter("b").Tick };
+                    foreach (var act in actions) act();
+                }
+            }
+            """);
+
+        Assert.Equal("a: 2\nticked a 3", output);
+    }
+
+    [Fact]
+    public void TypeNamesInCombinedPatternsAreTypeTests()
+    {
+        // In `is A or B`, each type name parses as a constant pattern; it must still test the
+        // type rather than compare against the constructor. Expected output is from .NET.
+        var output = Js.Run("""
+            using System;
+
+            public class Animal { }
+            public class Cat : Animal { }
+            public class Dog : Animal { }
+            public class Fish : Animal { }
+
+            public static class Program
+            {
+                public static void Main()
+                {
+                    foreach (var animal in new Animal[] { new Cat(), new Dog(), new Fish() })
+                    {
+                        Console.WriteLine(animal is Cat or Dog ? "mammal" : "other");
+                        Console.WriteLine(animal is not (Cat or Fish));
+                    }
+                }
+            }
+            """);
+
+        Assert.Equal("mammal\nFalse\nmammal\nTrue\nother\nFalse", output);
+    }
+
+    [Fact]
+    public void StaticConstructorsRunOnceAndAreNotMembers()
+    {
+        // A static constructor used to be emitted a second time as a class member named
+        // `_.cctor`, which is a syntax error. Expected output is from .NET.
+        var output = Js.Run("""
+            using System;
+            using System.Collections.Generic;
+
+            public static class Registry
+            {
+                public static readonly List<string> Names = new() { "zero" };
+
+                static Registry()
+                {
+                    Names.Add("first");
+                    Names.Add("second");
+                }
+            }
+
+            public class Counter
+            {
+                public static int Created;
+                public int Id;
+
+                static Counter() => Created = 100;
+
+                public Counter() => Id = ++Created;
+            }
+
+            public static class Program
+            {
+                public static void Main()
+                {
+                    Console.WriteLine(string.Join(",", Registry.Names));
+                    var a = new Counter();
+                    var b = new Counter();
+                    Console.WriteLine($"{a.Id} {b.Id}");
+                }
+            }
+            """);
+
+        Assert.Equal("zero,first,second\n101 102", output);
+    }
+
+    [Fact]
+    public void NestedTypesAreEmitted()
+    {
+        var output = Js.Run("""
+            using System;
+
+            public static class Program
+            {
+                private struct Point { public int X; public int Y; }
+                private class Box { public Point P; public override string ToString() => $"{P.X},{P.Y}"; }
+                private sealed record City(string Name, int Population);
+
+                // Evaluated as the container's class declaration runs, so City must exist first.
+                private static readonly City[] Cities = { new("Jakarta", 11), new("Tokyo", 14) };
+
+                public static void Main()
+                {
+                    var box = new Box();
+                    box.P.X = 3;
+                    box.P.Y = 4;
+                    var copy = box.P;
+                    copy.X = 9;
+                    Console.WriteLine(box);
+                    Console.WriteLine(copy.X);
+                    Console.WriteLine($"{Cities.Length} {Cities[1].Name} {Cities[1].Population}");
+                }
+            }
+            """);
+
+        Assert.Equal("3,4\n9\n2 Tokyo 14", output);
+    }
 }

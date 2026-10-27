@@ -415,4 +415,123 @@ blob:0:Blob
 Square
 """"), output);
     }
+
+    /// <summary>Template arguments that bind loosely (a conditional beside ??, a sum before .repeat), literal braces in templates, and StringBuilder.Append with an interpolated-string handler.</summary>
+    [Fact]
+    public void TemplateArgumentsKeepTheirMeaningMatchesDotNet()
+    {
+        var output = Js.Run(""""
+using System;
+using System.Linq;
+using System.Text;
+using System.Collections.Generic;
+
+public static class Program
+{
+    public static void Main()
+    {
+        var mapped = new List<int> { 3, 8, 12 };
+        var start = 20;
+        // A conditional argument next to ?? in the template.
+        Console.WriteLine(mapped.FirstOrDefault(l => l > start, mapped.Count > 0 ? mapped[0] : 0));
+        var none = new List<int>();
+        Console.WriteLine(none.FirstOrDefault(l => l > 1, none.Count > 0 ? none[0] : -7));
+        // A binary argument in front of a member call in the template.
+        int a = 2, b = 3;
+        Console.WriteLine(new string('*', a + b));
+        Console.WriteLine("x".PadLeft(a * b, '.'));
+        Console.WriteLine(string.Join("|", Enumerable.Repeat("ab", a + 1)));
+        // Interpolated-string handler overloads.
+        var sb = new StringBuilder();
+        for (var i = 0; i < 3; i++) sb.Append($"[{i}:{i * i}]");
+        sb.AppendLine($" done at {a + b}");
+        Console.Write(sb.ToString());
+        // A cast argument.
+        Console.WriteLine(Math.Max((int)2.9, a));
+        Console.WriteLine(TimeSpan.FromSeconds(a + b).TotalMilliseconds);
+    }
+}
+"""");
+
+        Assert.Equal(Normalize(""""
+3
+-7
+*****
+.....x
+ab|ab|ab
+[0:0][1:1][2:4] done at 5
+2
+5000
+""""), output);
+    }
+
+    /// <summary>System.Text.Json over anonymous types, nested anonymous objects, lists of them, and an anonymous value in an object-typed property.</summary>
+    [Fact]
+    public void AnonymousTypesSerializeLikeDotNet()
+    {
+        var output = Js.Run(""""
+using System;
+using System.Text.Json;
+using System.Collections.Generic;
+public class Box { public string Label { get; set; } = ""; public object? Meta { get; set; } }
+public static class Program
+{
+    public static void Main()
+    {
+        var title = "Buy milk";
+        Console.WriteLine(JsonSerializer.Serialize(new { title }));
+        Console.WriteLine(JsonSerializer.Serialize(new { Name = "Ana", Tags = new[] { "a", "b" }, Nested = new { Ok = true } }));
+        Console.WriteLine(JsonSerializer.Serialize(new List<object> { new { X = 1 }, new { X = 2 } }));
+        Console.WriteLine(JsonSerializer.Serialize(new Box { Label = "b", Meta = new { Id = 7 } }));
+    }
+}
+"""");
+
+        Assert.Equal(Normalize(""""
+{"title":"Buy milk"}
+{"Name":"Ana","Tags":["a","b"],"Nested":{"Ok":true}}
+[{"X":1},{"X":2}]
+{"Label":"b","Meta":{"Id":7}}
+""""), output);
+    }
+
+    [Fact]
+    public void DiscardsAreNotVariablesMatchesDotNet()
+    {
+        // `_` is a discard, not a binding: a later `var (_, b)` in the same function must not
+        // turn the earlier `_ = Work();` into a temporal-dead-zone ReferenceError.
+        var output = Js.Run(""""
+using System;
+using System.Threading.Tasks;
+public static class Program
+{
+    static async Task Work() { await Task.Delay(1); Console.WriteLine("worked"); }
+    static int Compute() => 42;
+    public static async Task Main()
+    {
+        _ = Work();
+        _ = Compute();
+        var (_, b) = (1, 2);
+        Console.WriteLine(b);
+        if (int.TryParse("5", out _)) Console.WriteLine("parsed");
+        var (x, (_, z)) = (3, (4, 5));
+        Console.WriteLine(x + z);
+        int c;
+        (_, c) = (6, 7);
+        Console.WriteLine(c);
+        if (int.TryParse("nope", out var _)) Console.WriteLine("wrong"); else Console.WriteLine("rejected");
+        await Task.Delay(20);
+    }
+}
+"""");
+
+        Assert.Equal(Normalize(""""
+2
+parsed
+8
+7
+rejected
+worked
+""""), output);
+    }
 }

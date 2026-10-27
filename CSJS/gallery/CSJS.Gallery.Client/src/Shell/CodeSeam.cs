@@ -56,6 +56,8 @@ public sealed class CodeSeam
         var mapped = _map.MappedSourceLines();
         var first = mapped.FirstOrDefault(l => l > start, mapped.Count > 0 ? mapped[0] : 0);
         SelectSource(first, pin: true, scroll: true);
+        // Hovering scrolls only the far side; on open, both panes start at the pinned pair.
+        Reveal(_csPane, _csLines, first);
     }
 
     private static int FindLine(string[] lines, string text)
@@ -191,7 +193,9 @@ public sealed class CodeSeam
     {
         if (index >= lines.Count) return;
         var line = lines[index];
-        var top = line.OffsetTop;
+        // OffsetTop counts from the nearest positioned ancestor, not the pane; measure against
+        // the pane itself so the line lands where it is meant to.
+        var top = line.GetBoundingClientRect().Top - pane.GetBoundingClientRect().Top + pane.ScrollTop;
         var visibleTop = pane.ScrollTop;
         var visibleBottom = visibleTop + pane.ClientHeight;
         if (top >= visibleTop + 24 && top + line.OffsetHeight <= visibleBottom - 24) return;

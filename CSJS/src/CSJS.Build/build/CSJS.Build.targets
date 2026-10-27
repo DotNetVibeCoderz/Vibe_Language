@@ -22,10 +22,18 @@
     <RunWorkingDirectory>$(MSBuildProjectDirectory)</RunWorkingDirectory>
   </PropertyGroup>
 
+  <!--
+    The engine is CSJS.Core.dll beside the tool, not cs2js.dll itself: a fixed emitter leaves
+    cs2js.dll untouched, so every assembly in the tool's folder counts as an input.
+  -->
+  <ItemGroup>
+    <_CsjsToolFiles Include="$([System.IO.Path]::GetDirectoryName('$(CsjsToolPath)'))/*.dll" />
+  </ItemGroup>
+
   <Target Name="CsjsTranspile"
           AfterTargets="CoreCompile"
           Condition="'$(CsjsEnabled)' == 'true' and '$(DesignTimeBuild)' != 'true' and '$(BuildingForLiveUnitTesting)' != 'true'"
-          Inputs="@(Compile);@(ReferencePath);$(MSBuildProjectFullPath);$(CsjsToolPath)"
+          Inputs="@(Compile);@(ReferencePath);$(MSBuildProjectFullPath);@(_CsjsToolFiles)"
           Outputs="$(IntermediateOutputPath)csjs.stamp">
 
     <PropertyGroup>

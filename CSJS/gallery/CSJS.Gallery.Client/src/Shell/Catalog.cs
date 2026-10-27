@@ -1,4 +1,8 @@
+using CSJS.Gallery.Client.Demos.Data;
+using CSJS.Gallery.Client.Demos.Device;
 using CSJS.Gallery.Client.Demos.Graphics;
+using CSJS.Gallery.Client.Demos.Media;
+using CSJS.Gallery.Client.Demos.Performance;
 using CSJS.Gallery.Client.Demos.Network;
 
 namespace CSJS.Gallery.Client.Shell;
@@ -22,7 +26,26 @@ public static class Catalog
     public static readonly List<Demo> All = new()
     {
         new FlowField(),
+        new ImageFilters(),
+        new Choreography(),
+        new DrawingPad(),
+        new Synth(),
+        new Camera(),
+        new Speech(),
+        new Geolocation(),
+        new Notifications(),
+        new DeviceInfo(),
+        new FileHashing(),
+        new Storage(),
+        new ClipboardDemo(),
+        new WorkerPrimes(),
+        new Observers(),
         new RestTodos(),
+        new GrpcGreeter(),
+        new SignalRChat(),
+        new SocketIoBoard(),
+        new EchoSocket(),
+        new SseTicker(),
     };
 
     public static Demo? Find(string id) => All.FirstOrDefault(d => d.Id == id);

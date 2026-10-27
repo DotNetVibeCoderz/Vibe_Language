@@ -23,6 +23,10 @@ public sealed class SocketIoServer
 
     private readonly ConcurrentDictionary<string, Client> _clients = new();
 
+    // The shared whiteboard: the most recent strokes, replayed to each socket as it connects.
+    private const int BoardLimit = 4000;
+    private readonly List<JsonElement> _board = new();
+
     private sealed class Client(WebSocket socket, string sid)
     {
         public WebSocket Socket { get; } = socket;
@@ -111,11 +115,15 @@ public sealed class SocketIoServer
             case '4' when packet.StartsWith("40", StringComparison.Ordinal):
                 _clients[client.Sid] = client;
                 await SendAsync(client, "40" + JsonSerializer.Serialize(new { sid = client.Sid }), cancel);
-                await BroadcastAsync("presence", new { online = _clients.Count, joined = client.Name }, cancel);
+                JsonElement[] board;
+                lock (_board) board = _board.ToArray();
+                await SendAsync(client, "42" + JsonSerializer.Serialize(new object[] { "history", board }), cancel);
+                await BroadcastAsync("presence", new { online = _clients.Count }, cancel);
                 return;
 
             case '4' when packet.StartsWith("41", StringComparison.Ordinal):
-                _clients.TryRemove(client.Sid, out _);
+                if (_clients.TryRemove(client.Sid, out _))
+                    await BroadcastAsync("presence", new { online = _clients.Count, left = client.Name }, cancel);
                 return;
 
             case '4' when packet.StartsWith("42", StringComparison.Ordinal):
@@ -151,7 +159,18 @@ public sealed class SocketIoServer
 
             case "draw" when data.ValueKind == JsonValueKind.Object:
                 // Shared whiteboard strokes go to everyone but the sender, who drew them already.
+                // The board is kept too, so a tab that joins later sees what is already there.
+                lock (_board)
+                {
+                    _board.Add(data.Clone());
+                    if (_board.Count > BoardLimit) _board.RemoveRange(0, _board.Count - BoardLimit);
+                }
                 await BroadcastAsync("draw", data, cancel, except: client.Sid);
+                return;
+
+            case "clear":
+                lock (_board) _board.Clear();
+                await BroadcastAsync("clear", client.Name, cancel);
                 return;
         }
     }

@@ -126,6 +126,10 @@ importing `./X.js`, and abstract properties shadowing their overrides.
       typings (or `@types/…`), generates bindings, and pins the version in `csjs.json`.
 - [x] **Playground sharing** via URL — the program travels in the fragment, so it is never
       uploaded.
+- [x] **`CSJS.Web`** — every browser API as typed C#, generated from `@types/web` and shipped as
+      a NuGet package.
+- [x] **CSJS Gallery** — 21 browser-API demos and an API playground (REST, gRPC-Web, SignalR,
+      Socket.IO, WebSocket, SSE), each demo beside its JavaScript at the seam.
 
 ### Next
 

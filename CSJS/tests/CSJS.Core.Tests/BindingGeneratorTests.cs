@@ -599,6 +599,63 @@ public class BindingGeneratorTests
         Assert.Equal(typeScript, TypeMap.ToTypeScript(field.Type));
     }
 
+    [Fact]
+    public void RestCallbacksSpreadIntoOneOverloadPerArity()
+    {
+        // SignalR's `on(name, (...args: any[]) => any)` and socket.io's `onAny` — before, the rest
+        // parameter was dropped and the callback received nothing. The constructors are
+        // socket.io-client's Manager: a union overload that expands into a duplicate of an
+        // explicit one differing only in nullability, which C# rejects (CS0111).
+        const string declarations = """
+            export interface Options { path?: string; }
+            export declare class Hub {
+              constructor(opts: Options);
+              constructor(uri?: string, opts?: Options);
+              constructor(uri?: string | Options, opts?: Options);
+              on(name: string, handler: (...args: any[]) => any): void;
+              off(name: string, handler: (...args: any[]) => void): void;
+              fire(name: string, ...args: any[]): void;
+            }
+            """;
+        const string module = """
+            export class Hub {
+              constructor(uri, opts) { this.handlers = new Map(); this.uri = typeof uri === 'string' ? uri : '(none)'; }
+              on(name, handler) { this.handlers.set(name, handler); }
+              off(name) { this.handlers.delete(name); }
+              fire(name, ...args) { const h = this.handlers.get(name); console.log(h ? `${name} -> ${h(...args)}` : `${name} unhandled`); }
+            }
+            """;
+        const string program = """
+            using System;
+            using Bindings.Lib;
+
+            public static class Program
+            {
+                public static void Main()
+                {
+                    var hub = new Hub("/hub");
+                    hub.On("none", () => Console.WriteLine("none called"));
+                    hub.On("one", (object a) => Console.WriteLine($"one {a}"));
+                    hub.On("two", (object a, object b) => $"{a}+{b}");
+                    hub.Fire("none");
+                    hub.Fire("one", "x");
+                    hub.Fire("two", 1, 2);
+                    hub.Off("two", (object a) => { });
+                    hub.Fire("two", 1, 2);
+                }
+            }
+            """;
+
+        var bindings = Generate(declarations, module: "./lib.js");
+        Assert.Contains("public virtual void On(string name, Action<object> handler)", bindings);
+        Assert.Contains("public virtual void On(string name, Func<object, object, object> handler)", bindings);
+        Assert.Contains("public virtual void Off(string name, Action<object, object, object> handler)", bindings);
+        Assert.DoesNotContain("rest parameter '...args' dropped", bindings);
+
+        var output = RunWith(bindings, program, ("lib.js", module));
+        Assert.Equal("none called\nnone -> undefined\none x\none -> undefined\ntwo -> 1+2\ntwo unhandled", output);
+    }
+
     // -------------------------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------------------------

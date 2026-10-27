@@ -30,6 +30,7 @@
   <ItemGroup>
     <ProjectReference Include="..\src\CSJS.Core\CSJS.Core.csproj" />
     <ProjectReference Include="..\src\CSJS.Interop\CSJS.Interop.csproj" />
+    <ProjectReference Include="..\src\CSJS.Web\CSJS.Web.csproj" />
   </ItemGroup>
 
 </Project>

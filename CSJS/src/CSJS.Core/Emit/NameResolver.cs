@@ -58,7 +58,14 @@ public sealed class NameResolver
                 var ns = type.ContainingNamespace is { IsGlobalNamespace: false } n
                     ? n.ToDisplayString().Replace('.', '_') + "_"
                     : "";
-                _typeNames[type] = Escape(ns + shortName);
+
+                // Nested types share a namespace with their siblings' nested types, so the
+                // containing types are part of what tells two of them apart.
+                var outer = "";
+                for (var container = type.ContainingType; container is not null; container = container.ContainingType)
+                    outer = container.Name + "_" + outer;
+
+                _typeNames[type] = Escape(ns + outer + shortName);
             }
         }
     }

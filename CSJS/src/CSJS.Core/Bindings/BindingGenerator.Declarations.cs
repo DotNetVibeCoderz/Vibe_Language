@@ -425,7 +425,8 @@ public sealed partial class BindingGenerator
                         Name = type.Name,
                         Kind = CsMemberKind.Constructor,
                         Access = accessModifier,
-                        Signature = ".ctor(" + string.Join(",", parameterList.Select(p => p.Type)) + ")",
+                        // Nullable annotations do not distinguish C# overloads, so they do not distinguish signatures.
+                        Signature = ".ctor(" + string.Join(",", parameterList.Select(p => p.Type.TrimEnd('?'))) + ")",
                         Doc = DocLines(signature.Doc, parameterList),
                         Notes = TakeNotes(context),
                         Declaration = $"{type.Name}({RenderParameters(parameterList)}) => throw new JsExternException();",
@@ -1358,6 +1359,12 @@ public sealed partial class BindingGenerator
             var functionContext = alternative.Context;
             if (Unwrap(alternative.Type, ref functionContext) is TsFunctionType function && !function.IsConstructor)
             {
+                if (SpreadRestCallback(function, functionContext) is { } spread)
+                {
+                    mapped.AddRange(spread);
+                    continue;
+                }
+
                 var returnAlternatives = Alternatives(function.ReturnType, functionContext, out _, out var returnsVoid);
                 if (returnsVoid && returnAlternatives.Count > 0)
                 {
@@ -1377,6 +1384,44 @@ public sealed partial class BindingGenerator
         mapped = mapped.Distinct().ToList();
         if (nullable && !parameter.Optional) mapped = mapped.Select(TypeMap.FromTypeScriptNullable).ToList();
         return mapped;
+    }
+
+    private const int MaxSpreadArguments = 3;
+
+    /// <summary>
+    /// A callback parameter declared <c>(...args: T[]) =&gt; R</c> — SignalR's
+    /// <c>on(name, (...args) =&gt; …)</c>, an event emitter's listener — is called with however
+    /// many arguments the library has. A C# delegate has a fixed arity, so it becomes one
+    /// overload per arity, zero to <see cref="MaxSpreadArguments"/>, and a lambda picks its own by
+    /// how many parameters it declares. A callback returning <c>any</c> also gets void-returning
+    /// forms: a handler written as a statement returns nothing, and JavaScript does not mind.
+    /// Returns null when the callback has no rest parameter.
+    /// </summary>
+    private List<string>? SpreadRestCallback(TsFunctionType function, TypeContext context)
+    {
+        var parameters = function.Parameters.Where(p => p.Name != "this").ToList();
+        if (parameters.Count == 0 || !parameters[^1].Rest) return null;
+
+        var rest = parameters[^1];
+        var element = RestElementType(rest.Type, context);
+        var leading = parameters.Take(parameters.Count - 1).ToList();
+        var probe = context;
+        var returnsAnything = Unwrap(function.ReturnType, ref probe) is TsTypeReference { Name: "any" or "unknown", Arguments.Count: 0 };
+        var voidType = new TsTypeReference("void", Array.Empty<TsType>());
+
+        var result = new List<string>();
+        for (var arity = 0; arity <= MaxSpreadArguments; arity++)
+        {
+            var spread = leading
+                .Concat(Enumerable.Range(1, arity).Select(i => new TsParameter(rest.Name + i, element, false, false)))
+                .ToList();
+            var variant = function with { Parameters = spread };
+            if (returnsAnything) result.Add(Map(variant with { ReturnType = voidType }, Flow.In, context));
+            result.Add(Map(variant, Flow.In, context));
+        }
+
+        Note(context, $"callback rest parameter '...{rest.Name}' spread into overloads taking 0 to {MaxSpreadArguments} arguments");
+        return result.Distinct().ToList();
     }
 
     private TsType RestElementType(TsType type, TypeContext context)

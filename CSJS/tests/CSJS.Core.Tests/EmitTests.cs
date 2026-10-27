@@ -197,6 +197,42 @@ public class EmitTests
     }
 
     [Fact]
+    public void GlobalShadowedByALocalIsReachedThroughGlobalThis()
+    {
+        // A [JsGlobal] member is written by its bare name, so a local of the same name would
+        // capture it: `const screen = …; screen.width` read the local, not the global.
+        var js = Js.Emit("""
+            using CSJS;
+
+            [JsGlobal("Screen")]
+            public class Screen
+            {
+                public double Width => throw new JsExternException();
+            }
+
+            public static class Globals
+            {
+                [JsGlobal("screen")]
+                public static Screen Screen => throw new JsExternException();
+            }
+
+            public static class App
+            {
+                public static double Shadowed()
+                {
+                    var screen = "a card";
+                    return Globals.Screen.Width + screen.Length;
+                }
+
+                public static double Plain() => Globals.Screen.Width;
+            }
+            """);
+
+        Js.Contains("globalThis.screen.width + screen.length", js);
+        Js.Contains("return screen.width;", js);
+    }
+
+    [Fact]
     public void JsNameOverridesEmittedName()
     {
         var js = Js.Emit("""

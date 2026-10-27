@@ -31,6 +31,22 @@ export function csjsEquals(a, b) {
   return false;
 }
 
+const csjsBound = new WeakMap();
+
+/**
+ * An instance method used as a delegate: `requestAnimationFrame(Tick)`. JavaScript would call
+ * the bare function with no `this`; C# delegates carry their target. The bound function is cached
+ * per target and method, so the same method group yields the same function every time — which is
+ * what lets `-=` and removeEventListener find it again, as delegate equality does in C#.
+ */
+export function csjsBind(target, method) {
+  let methods = csjsBound.get(target);
+  if (!methods) csjsBound.set(target, (methods = new Map()));
+  let bound = methods.get(method);
+  if (!bound) methods.set(method, (bound = method.bind(target)));
+  return bound;
+}
+
 /** A stable string hash, standing in for GetHashCode(). */
 export function csjsHash(value) {
   const s = csjsToString(value);

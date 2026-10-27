@@ -63,23 +63,11 @@ app.Map("/socket.io/", (HttpContext context, SocketIoServer server) => server.Ac
 app.Map("/ws/echo", (HttpContext context) => EchoSocket.AcceptAsync(context));
 
 // ---- Server-Sent Events --------------------------------------------------------------------
-// A ticker: one event a second, each carrying a pseudo price, until the client disconnects.
+// A ticker: one price a second from one shared series. Each event carries its sequence number
+// as its id, and the stream ends every 30 live ticks on purpose — the browser reconnects with
+// Last-Event-ID and the missed ticks are replayed, which is the point of the demo.
 
-app.MapGet("/sse/ticker", async (HttpContext context, CancellationToken cancel) =>
-{
-    context.Response.Headers.ContentType = "text/event-stream";
-    context.Response.Headers.CacheControl = "no-cache";
-
-    var price = 100.0;
-    var random = new Random();
-    for (var id = 1; !cancel.IsCancellationRequested; id++)
-    {
-        price = Math.Round(price * (1 + (random.NextDouble() - 0.5) / 50), 2);
-        await context.Response.WriteAsync($"id: {id}\nevent: tick\ndata: {{\"symbol\":\"CSJS\",\"price\":{price.ToString(System.Globalization.CultureInfo.InvariantCulture)},\"seq\":{id}}}\n\n", cancel);
-        await context.Response.Body.FlushAsync(cancel);
-        try { await Task.Delay(1000, cancel); } catch (TaskCanceledException) { break; }
-    }
-});
+app.MapGet("/sse/ticker", (HttpContext context, CancellationToken cancel) => Ticker.StreamAsync(context, cancel));
 
 app.MapFallbackToFile("index.html");
 

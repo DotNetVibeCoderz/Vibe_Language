@@ -3,9 +3,9 @@
 Development status. Roadmap lives in [Plan.md](Plan.md).
 
 **Last updated:** 27 October 2026
-**Version:** 0.2.0
+**Version:** 0.3.0
 **Build:** `dotnet build CSJS.slnx` — succeeds, no warnings
-**Tests:** 213 passing, 0 failing
+**Tests:** 229 passing, 0 failing
 
 ---
 
@@ -240,6 +240,15 @@ in `CLAUDE.md`: take expected output from .NET, never from reasoning.
 | `cs2js add <npm-package>` | Done | run against react, vue, @angular/core, @angular/platform-browser |
 | React, Vue, Angular bindings | Shipped in `bindings/` | components compiled and run against the real packages under jsdom |
 | Playground share links | Done | a link encoded by an independent (Python) encoder opened and transpiled in the WebAssembly Playground; a link from the Share button decoded back byte-identically |
+| `CSJS.Web` — the whole web platform as C# | Done | generated from `@types/web` (1,464 types, 19,338 members) by `cs2js bind --platform`; 4 binding tests; used by every gallery demo |
+| CSJS Gallery (`gallery/`) | Done | 21 demos in six sections, each opened in headless Chrome with no page errors; network demos round-tripped against the gallery server (REST, gRPC-Web, SignalR, Socket.IO, WebSocket, SSE) |
+
+The gallery found engine bugs that tests had not, each now fixed with a test whose expected output
+came from .NET: method groups lost their receiver, nested types were not emitted, static
+constructors leaked out as members, `x is A or B` compared against the constructor, a local could
+shadow a browser global, `is null` missed `undefined`, local functions lost `this`, `{{`/`}}` came
+out doubled, and a discard `_` became a real variable. CSJS.Build now re-transpiles when only the
+engine changed.
 
 ---
 
@@ -250,13 +259,13 @@ in `CLAUDE.md`: take expected output from .NET, never from reasoning.
 | Projects | 11 |
 | Source files | 117 (plus 4 generated framework binding files) |
 | Lines of code | ~39,100 (plus ~43,000 generated bindings) |
-| Tests | 213, all passing |
+| Tests | 229, all passing |
 | BCL member mappings | 554, plus generated `MathF` and integral-type entries |
 | Runtime helpers | 109 |
 | Kernel functions | 18 |
 | Project templates | 21 in CSJSGen, 5 in `CSJS.Templates` |
 | Prompt templates | 24 |
-| NuGet packages | 7 |
+| NuGet packages | 8 |
 
 ---
 

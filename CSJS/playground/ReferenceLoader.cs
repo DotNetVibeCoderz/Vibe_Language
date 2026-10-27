@@ -17,7 +17,8 @@ public sealed class ReferenceLoader
 
     /// <summary>
     /// The assemblies user code can reference. This is the BCL surface the transpiler maps,
-    /// plus the interop library that carries the attributes and browser bindings.
+    /// plus the interop library that carries the attributes and browser bindings, and CSJS.Web —
+    /// the whole web platform — so anything written against <c>CSJS.Web</c> transpiles here too.
     /// </summary>
     private static readonly string[] AssemblyNames =
     {
@@ -31,8 +32,11 @@ public sealed class ReferenceLoader
         "System.Text.RegularExpressions",
         "System.Threading",
         "System.Threading.Tasks",
+        "System.Memory",
+        "System.Text.Json",
         "netstandard",
         "CSJS.Interop",
+        "CSJS.Web",
     };
 
     /// <summary>Fetches the reference set, downloading it on first use.</summary>

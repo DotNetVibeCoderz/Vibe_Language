@@ -53,6 +53,9 @@ public sealed partial class JsEmitter
 
     private void EmitExpressionCore(ExpressionSyntax expression)
     {
+        if (expression is IdentifierNameSyntax or MemberAccessExpressionSyntax && TryEmitBoundMethodGroup(expression))
+            return;
+
         switch (expression)
         {
             case LiteralExpressionSyntax literal: EmitLiteral(literal); break;
@@ -214,7 +217,7 @@ public sealed partial class JsEmitter
         {
             if (TryEmitExtensionPropertyRead(identifier, symbol, null)) return;
 
-            if (TryEmitGlobalMember(symbol)) return;
+            if (TryEmitGlobalMember(symbol, identifier)) return;
 
             if (MemberMap.Find(symbol) is { } template)
             {
@@ -233,6 +236,67 @@ public sealed partial class JsEmitter
         }
 
         Write(NameResolver.Escape(identifier.Identifier.Text));
+    }
+
+    /// <summary>
+    /// An instance method converted to a delegate rather than called — <c>Button("Clear", Clear)</c>,
+    /// <c>RequestAnimationFrame(Tick)</c>. A C# delegate carries its target; a JavaScript function
+    /// reference does not, so the method is bound to its receiver through <c>csjsBind</c>, which
+    /// also keeps the bound function stable for <c>-=</c> and <c>removeEventListener</c>.
+    /// </summary>
+    private bool TryEmitBoundMethodGroup(ExpressionSyntax expression)
+    {
+        // Invoked, or only the name half of an access: not a conversion.
+        if (expression.Parent is InvocationExpressionSyntax invocation && invocation.Expression == expression) return false;
+        if (expression.Parent is MemberAccessExpressionSyntax access && access.Name == expression) return false;
+
+        if (_ctx.SymbolFor(expression) is not IMethodSymbol
+            {
+                MethodKind: MethodKind.Ordinary, IsStatic: false, ReducedFrom: null,
+            } method)
+            return false;
+        if (_ctx.Model.GetTypeInfo(expression).ConvertedType is not { TypeKind: TypeKind.Delegate }) return false;
+
+        // Only methods that exist on the JavaScript object as written: user-declared ones and
+        // bindings. Mapped BCL members and templates have no function to bind.
+        if (method.DeclaringSyntaxReferences.Length == 0 && !NameResolver.IsBindingMember(method)) return false;
+        if (GetJsTemplate(method) is not null || MemberMap.Find(method) is not null) return false;
+
+        var name = _ctx.Names.MemberName(method);
+        var self = _thisAlias ?? "this";
+        _ctx.UseHelper("csjsBind");
+
+        switch (expression)
+        {
+            case IdentifierNameSyntax:
+            case MemberAccessExpressionSyntax { Expression: ThisExpressionSyntax }:
+                Write($"csjsBind({self}, {self}.{name})");
+                return true;
+
+            case MemberAccessExpressionSyntax { Expression: BaseExpressionSyntax }:
+                Write($"csjsBind({self}, super.{name})");
+                return true;
+
+            case MemberAccessExpressionSyntax { Expression: IdentifierNameSyntax receiver }
+                when _ctx.SymbolFor(receiver) is ILocalSymbol or IParameterSymbol:
+                Write("csjsBind(");
+                EmitExpression(receiver);
+                Write(", ");
+                EmitExpression(receiver);
+                Write($".{name})");
+                return true;
+
+            case MemberAccessExpressionSyntax other:
+                // Evaluated once, as C# evaluates the receiver once at the conversion.
+                Write("(($m) => csjsBind($m, $m.");
+                Write(name);
+                Write("))(");
+                EmitExpression(other.Expression);
+                Write(")");
+                return true;
+        }
+
+        return false;
     }
 
     private void EmitGenericName(GenericNameSyntax generic)
@@ -258,7 +322,7 @@ public sealed partial class JsEmitter
     /// anything called <c>Timers</c> — so a member-level <c>[JsGlobal]</c> replaces the whole access.
     /// </para>
     /// </summary>
-    private bool TryEmitGlobalMember(ISymbol? symbol)
+    private bool TryEmitGlobalMember(ISymbol? symbol, SyntaxNode site)
     {
         if (symbol is null || !symbol.IsStatic) return false;
 
@@ -273,8 +337,24 @@ public sealed partial class JsEmitter
             ? s
             : symbol.Name;
 
+        // `var screen = …; Js.Screen.Width` would read the local in JavaScript, because the global
+        // is written by its bare name. When a C# local or parameter of that name is in scope, the
+        // global is reached through globalThis instead.
+        if (IsShadowedByLocal(name, site)) name = "globalThis." + name;
+
         Write(name);
         return true;
+    }
+
+    private bool IsShadowedByLocal(string name, SyntaxNode site)
+    {
+        // Only a plain identifier, or the first segment of a dotted path, can be shadowed.
+        var head = name.Split('.')[0];
+        if (head.Length == 0 || head == "globalThis") return false;
+        if (site.SyntaxTree != _ctx.Model.SyntaxTree) return false;
+
+        return _ctx.Model.LookupSymbols(site.SpanStart, name: head)
+            .Any(s => s is ILocalSymbol or IParameterSymbol or IRangeVariableSymbol);
     }
 
     /// <summary>
@@ -308,7 +388,7 @@ public sealed partial class JsEmitter
     {
         var symbol = _ctx.SymbolFor(member);
 
-        if (TryEmitGlobalMember(symbol)) return;
+        if (TryEmitGlobalMember(symbol, member)) return;
         if (TryEmitExtensionPropertyRead(member, symbol, member.Expression)) return;
 
         // A tuple is emitted as an array, so a named element is really an index.
@@ -640,7 +720,7 @@ public sealed partial class JsEmitter
         switch (target)
         {
             case MemberAccessExpressionSyntax member:
-                if (TryEmitGlobalMember(symbol)) return;
+                if (TryEmitGlobalMember(symbol, member)) return;
                 if (symbol.IsStatic && symbol.ContainingType is { } owner
                     && member.Expression is not ThisExpressionSyntax)
                 {
@@ -899,6 +979,9 @@ public sealed partial class JsEmitter
     private static bool IsInterpolatedStringHandler(ITypeSymbol type)
         => type.GetAttributes().Any(a => a.AttributeClass?.Name == "InterpolatedStringHandlerAttribute");
 
+    /// <summary>The hoisted binding an <c>out _</c> argument writes to.</summary>
+    private const string DiscardSink = "$discard";
+
     private bool IsDiscard(ExpressionSyntax expression) => expression switch
     {
         DeclarationExpressionSyntax { Designation: DiscardDesignationSyntax } => true,
@@ -912,6 +995,12 @@ public sealed partial class JsEmitter
         if (argument.Expression is DeclarationExpressionSyntax { Designation: SingleVariableDesignationSyntax single })
         {
             Write(NameResolver.Escape(single.Identifier.Text));
+            return;
+        }
+        // `out _` still needs somewhere to land; DeclareHoistedVariables hoists this sink.
+        if (IsDiscard(argument.Expression))
+        {
+            Write(DiscardSink);
             return;
         }
         EmitExpression(argument.Expression);
@@ -1647,9 +1736,16 @@ public sealed partial class JsEmitter
 
     private void EmitTuple(TupleExpressionSyntax tuple)
     {
-        // C# tuples become arrays, which destructure identically on the JavaScript side.
+        // C# tuples become arrays, which destructure identically on the JavaScript side. As a
+        // deconstruction target a discard is an array hole: `[, b] = …` binds nothing.
+        var isTarget = tuple.Parent is AssignmentExpressionSyntax target && target.Left == tuple
+                       || tuple.Parent is ArgumentSyntax { Parent: TupleExpressionSyntax };
         Write("[");
-        WriteJoined(tuple.Arguments, a => EmitValue(a.Expression));
+        WriteJoined(tuple.Arguments, a =>
+        {
+            if (isTarget && IsDiscard(a.Expression)) return;
+            EmitValue(a.Expression);
+        });
         Write("]");
     }
 
@@ -1926,6 +2022,14 @@ public sealed partial class JsEmitter
 
     private void EmitEquality(BinaryExpressionSyntax binary, bool negated)
     {
+        // A comparison with the null literal is loose, so `undefined` from interop counts as null —
+        // the same rule as `is null`.
+        if (binary.Left.IsKind(SyntaxKind.NullLiteralExpression) || binary.Right.IsKind(SyntaxKind.NullLiteralExpression))
+        {
+            EmitBinaryOperands(binary, negated ? "!=" : "==");
+            return;
+        }
+
         var leftType = _ctx.TypeFor(binary.Left);
         var rightType = _ctx.TypeFor(binary.Right);
 
@@ -2098,6 +2202,14 @@ public sealed partial class JsEmitter
 
     private void EmitAssignment(AssignmentExpressionSyntax assignment)
     {
+        // `_ = Work();` evaluates for effect only. A discard is not a variable, and writing `_`
+        // would collide with — or be shadowed by — a real binding of that name.
+        if (assignment.IsKind(SyntaxKind.SimpleAssignmentExpression) && IsDiscard(assignment.Left))
+        {
+            EmitExpression(assignment.Right);
+            return;
+        }
+
         // An event is a handler array, so `+=` pushes and `-=` removes.
         if (_ctx.SymbolFor(assignment.Left) is IEventSymbol)
         {
@@ -2579,6 +2691,19 @@ public sealed partial class JsEmitter
     {
         switch (pattern)
         {
+            case ConstantPatternSyntax constant when constant.Expression.IsKind(SyntaxKind.NullLiteralExpression):
+                // C# has one null; JavaScript has two. A value from a library or the DOM is often
+                // `undefined`, and `is null` must be true for it — `== null` is true for exactly those two.
+                emitValue();
+                Write(" == null");
+                return;
+
+            // Inside `or`/`and`/`not`, a bare type name parses as a constant pattern; the
+            // semantic model is what says it is really a type test.
+            case ConstantPatternSyntax constant when _ctx.SymbolFor(constant.Expression) is ITypeSymbol constantType:
+                EmitTypeTest(emitValue, constantType, constant);
+                return;
+
             case ConstantPatternSyntax constant:
                 emitValue();
                 Write(" === ");
@@ -2833,7 +2958,11 @@ public sealed partial class JsEmitter
             switch (content)
             {
                 case InterpolatedStringTextSyntax text:
-                    Write(EscapeTemplateText(text.TextToken.ValueText));
+                    // Roslyn leaves `{{` and `}}` doubled in the text token; in a regular
+                    // interpolated string they are escapes for one brace. Raw strings have none.
+                    var literal = text.TextToken.ValueText;
+                    if (!isRaw) literal = literal.Replace("{{", "{").Replace("}}", "}");
+                    Write(EscapeTemplateText(literal));
                     break;
 
                 case InterpolationSyntax interpolation:
@@ -3032,15 +3161,30 @@ public sealed partial class JsEmitter
                 break;
 
             case ParenthesizedVariableDesignationSyntax parenthesized:
-                Write("[");
-                WriteJoined(parenthesized.Variables, v =>
-                    Write(v is SingleVariableDesignationSyntax s ? NameResolver.Escape(s.Identifier.Text) : "_"));
-                Write("]");
+                EmitDesignationPattern(parenthesized);
                 break;
 
             default:
-                Write("_");
+                Write(DiscardSink);
                 break;
         }
+    }
+
+    /// <summary>
+    /// <c>var (a, (_, c))</c> as an array pattern: nested designations nest, and a discard is a
+    /// hole rather than a binding named <c>_</c>.
+    /// </summary>
+    private void EmitDesignationPattern(ParenthesizedVariableDesignationSyntax parenthesized)
+    {
+        Write("[");
+        WriteJoined(parenthesized.Variables, v =>
+        {
+            switch (v)
+            {
+                case SingleVariableDesignationSyntax s: Write(NameResolver.Escape(s.Identifier.Text)); break;
+                case ParenthesizedVariableDesignationSyntax nested: EmitDesignationPattern(nested); break;
+            }
+        });
+        Write("]");
     }
 }

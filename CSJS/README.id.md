@@ -220,18 +220,79 @@ import { Scene } from 'three';
 Anggota tipe binding otomatis di-camelCase, jadi `QuerySelector` memancarkan `querySelector`
 tanpa perlu `[JsName]` di setiap anggota.
 
+### Seluruh web platform, sudah ter-binding
+
+[`CSJS.Web`](src/CSJS.Web) adalah setiap interface `lib.dom` sebagai C# bertipe — 1.464 tipe dan
+19.338 anggota, dari DOM dan Canvas sampai Web Audio, WebGL, WebGPU, WebRTC, Web Crypto,
+IndexedDB, dan WebSocket — dibuat oleh generator binding milik CSJS sendiri, lengkap dengan
+pewarisan yang sebenarnya dan dokumentasi MDN di setiap anggota. Paket ini ikut bersama CLI,
+language server, dan `CSJS.Build`, jadi tidak ada yang perlu dipasang:
+
+```csharp
+using CSJS.Web;
+
+var ctx = Dom.Query<HTMLCanvasElement>("#stage")!.GetContext2D();
+ctx.FillStyle = "#a78bfa";
+ctx.FillRect(0, 0, 120, 80);
+
+var digest = await Js.Crypto.Subtle.Digest("SHA-256", new TextEncoder().Encode("hello"));
+var hex = string.Concat(new Uint8Array(digest).ToArray().Select(b => b.ToString("x2")));
+await Js.Navigator.Clipboard.WriteText(hex);
+```
+
+Setiap pemanggilan menjadi tepat JavaScript yang ia sebut — `document.querySelector('#stage')`,
+`crypto.subtle.digest(…)` — tanpa pembungkus di antaranya.
+
+## Gallery
+
+[`gallery/`](gallery) adalah aplikasi showcase yang seluruhnya ditulis dalam C#: canvas, audio,
+kamera, Web Worker yang juga C#, berkas, penyimpanan, kripto — dan API playground yang berbicara
+REST, gRPC-Web, SignalR, Socket.IO, WebSocket, dan Server-Sent Events ke server ASP.NET Core
+sungguhan. Setiap demo bersanding dengan JavaScript hasilnya, disambung di *seam*: arahkan kursor
+ke satu baris C# dan benang yang digambar dari source map modul itu sendiri menunjukkan
+JavaScript apa yang dihasilkannya.
+
+```bash
+dotnet run --project gallery/CSJS.Gallery
+```
+
+![CSJS Gallery](docs/images/gallery/home.png)
+
+*Halaman utama: seam di hero berjalan di atas `SourceMap.cs`, kode yang menggambar benangnya sendiri.*
+
+![The seam](docs/images/gallery/seam.png)
+
+*Seam di bawah demo: baris C# yang disematkan dan JavaScript hasilnya, berdampingan.*
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/images/gallery/image-filters.png" alt="Filter piksel"><br><sub>Filter piksel</sub></td>
+    <td width="33%"><img src="docs/images/gallery/web-audio-synth.png" alt="Synthesiser"><br><sub>Synthesiser</sub></td>
+    <td width="33%"><img src="docs/images/gallery/web-worker.png" alt="Web Worker dalam C#"><br><sub>Web Worker dalam C#</sub></td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/images/gallery/socket-io.png" alt="Papan tulis Socket.IO"><br><sub>Papan tulis Socket.IO</sub></td>
+    <td width="33%"><img src="docs/images/gallery/grpc-web.png" alt="gRPC-Web, dibingkai manual"><br><sub>gRPC-Web, dibingkai manual</sub></td>
+    <td width="33%"><img src="docs/images/gallery/server-sent-events.png" alt="Server-Sent Events"><br><sub>Server-Sent Events</sub></td>
+  </tr>
+</table>
+
+Lihat [docs/gallery.md](docs/gallery.md).
+
 ## Bagian-bagiannya
 
 | | |
 | --- | --- |
 | **[`CSJS.Core`](src/CSJS.Core)** | Transpiler: front end Roslyn, emitter JavaScript, emitter `.d.ts`, source map. |
 | **[`CSJS.Interop`](src/CSJS.Interop)** | Atribut interop dan binding browser bertipe. |
+| **[`CSJS.Web`](src/CSJS.Web)** | Seluruh web platform sebagai C# bertipe, dibuat dari `lib.dom`. |
 | **[`CSJS.Cli`](src/CSJS.Cli)** | `cs2js` — build, run, watch, serve, new, bind, add, lsp. |
 | **[`CSJS.Build`](src/CSJS.Build)** | Integrasi MSBuild: `dotnet build` mentranspilasi sebuah `.csproj`. |
 | **[`CSJS.LanguageService`](src/CSJS.LanguageService)** | Completion, hover, signature help, definition, dan diagnostik — dipakai bersama oleh `cs2js lsp` dan CSJSGen. |
 | **[`CSJS.Testing`](src/CSJS.Testing)** | Menulis test dalam C#, menjalankannya di runtime JavaScript. |
 | **[`CSJSGen`](src/CSJSGen)** | Editor desktop dengan **Jack The Code Bender**, asisten AI. |
-| **[Playground](playground)** | Transpiler yang berjalan di browser lewat WebAssembly. |
+| **[Gallery](gallery)** | Demo web platform dan API playground, semuanya C#, masing-masing bersanding dengan JavaScript-nya. |
+| **[Playground](playground)** | Transpiler yang berjalan di browser lewat WebAssembly. Bagikan program sebagai tautan. |
 | **[Ekstensi VS Code](vscode-extension)** | Language client untuk `cs2js lsp`, pewarnaan sintaks, task, jembatan debugging. |
 | **[Template](templates)** | `CSJS.Templates`: aplikasi browser, pustaka npm, ASP.NET + JS, Blazor Hybrid, Console-to-Web. |
 | **[Binding framework](bindings)** | React, Vue, dan Angular, dibuat dari `.d.ts`-nya oleh `cs2js add`. |

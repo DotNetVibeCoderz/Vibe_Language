@@ -8,6 +8,8 @@
 | [CLI reference](cli.md) | Every command, every `csjs.json` field, every diagnostic, bundling, live reload, and `CSJS.Build`. |
 | [Bindings](bindings.md) | Generating C# bindings from TypeScript declarations; `cs2js bind` and `cs2js add`. |
 | [Language server](language-server.md) | `cs2js lsp` and setting it up in VS Code, Rider, Visual Studio, and Neovim. |
+| [Gallery](gallery.md) | Live demos of the web platform in C#, the seam view, and the API playground. |
+| [CSJS.Web](../src/CSJS.Web/README.md) | The whole web platform as typed C#, and how it is generated from `lib.dom`. |
 | [CSJSGen](csjsgen.md) | The desktop editor and Jack The Code Bender. |
 | [Architecture](architecture.md) | How the engine works, and why it is built this way. |
 | [Releasing](releasing.md) | The packages, the CI workflow, and how a version gets published. |
